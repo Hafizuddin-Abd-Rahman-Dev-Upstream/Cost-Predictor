@@ -65,6 +65,22 @@ def check_password():
     # Return False if the password is wrong or not yet validated.
     return False
 
+def get_currency_symbol(df):
+    """Extract currency symbol from column names or return default"""
+    for col in df.columns:
+        if '' in col.upper():
+            return ''
+        elif '' in col.upper() or '$' in col:
+            return ''
+        elif '' in col.upper() or '€' in col:
+            return ''
+        elif '' in col.upper() or '£' in col:
+            return ''
+    return ''  # Default to RM
+
+def format_currency(amount, currency=''):
+    """Format amount as currency in millions"""
+    return f"{currency} {amount:.2f} Mil"
 
 def download_all_predictions():
     """Create a combined Excel file with all predictions separated by dataset in different sheets"""
@@ -587,7 +603,6 @@ if __name__ == '__main__':
 
 
 # In[ ]:
-
 
 
 
