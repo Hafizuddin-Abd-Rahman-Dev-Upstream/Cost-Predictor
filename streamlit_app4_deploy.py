@@ -80,7 +80,7 @@ def get_currency_symbol(df):
 
 def format_currency(amount, currency=''):
     """Format amount as currency in millions"""
-    return f"{currency} {amount:.2f} Mil"
+    return f"{currency} {amount:.2f}"
 
 def download_all_predictions():
     """Create a combined Excel file with all predictions separated by dataset in different sheets"""
