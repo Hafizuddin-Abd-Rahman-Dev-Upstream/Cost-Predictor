@@ -68,13 +68,13 @@ def check_password():
 def get_currency_symbol(df):
     """Extract currency symbol from column names or return default"""
     for col in df.columns:
-        if 'RM' in col.upper():
+        if '' in col.upper():
             return 'RM'
-        elif 'USD' in col.upper() or '$' in col:
+        elif '' in col.upper() or '$' in col:
             return 'USD'
-        elif 'EUR' in col.upper() or '€' in col:
+        elif '' in col.upper() or '€' in col:
             return 'EUR'
-        elif 'GBP' in col.upper() or '£' in col:
+        elif '' in col.upper() or '£' in col:
             return 'GBP'
     return ''  # Default to RM
 
