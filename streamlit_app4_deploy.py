@@ -76,9 +76,9 @@ def get_currency_symbol(df):
             return 'EUR'
         elif 'GBP' in col.upper() or '£' in col:
             return 'GBP'
-    return ''  # Default to RM
+    return 'RM'  # Default to RM
 
-def format_currency(amount, currency='RM'):
+def format_currency(amount, currency=''):
     """Format amount as currency in millions"""
     return f"{currency} {amount:.2f} Mil"
 
