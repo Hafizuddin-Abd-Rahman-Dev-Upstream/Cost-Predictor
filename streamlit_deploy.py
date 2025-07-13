@@ -16,7 +16,6 @@ import numpy as np
 from scipy.stats import linregress
 from sklearn.impute import KNNImputer
 import io
-import requests
 
 # Set page config
 st.set_page_config(
@@ -30,6 +29,8 @@ GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
 DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
+
+import requests
 
 @st.cache_data
 def list_csvs_from_github():
