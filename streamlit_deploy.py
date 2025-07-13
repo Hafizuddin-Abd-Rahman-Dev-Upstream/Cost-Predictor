@@ -153,7 +153,7 @@ def main():
     if 'datasets' not in st.session_state:
         st.session_state['datasets'] = {}
     if 'predictions' not in st.session_state:
-        st.session_state['predictions'] = []  # unified predictions list
+        st.session_state['predictions'] = {}
     if 'processed_excel_files' not in st.session_state:
         st.session_state['processed_excel_files'] = set()
     
@@ -434,7 +434,7 @@ def main():
         grand_total = round(pred + owners_cost + contingency_cost + escalation_cost, 2)
         result["Grand Total"] = grand_total
         
-        st.session_state['predictions'].append(result)
+        st.session_state['predictions'][selected_dataset_name].append(result)
         
        # Build display text with all costs on separate lines
         display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
@@ -583,7 +583,7 @@ def main():
 
     # Project list & delete buttons
     with st.expander('Simplified Project List', expanded=True):
-        preds = st.session_state['predictions']
+        preds = st.session_state['predictions'][selected_dataset_name]
         if preds:
             if st.button('Delete All', key='delete_all'):
                 st.session_state['predictions'][selected_dataset_name] = []
@@ -646,4 +646,3 @@ if __name__ == '__main__':
 
 
 # In[ ]:
-
