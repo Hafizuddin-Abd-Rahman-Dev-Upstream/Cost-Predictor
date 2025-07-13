@@ -24,6 +24,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# GitHub Repo Configuration (set these to your actual values)
+GITHUB_USER = "apizrahman24"
+REPO_NAME = "Cost-predictor"
+BRANCH = "main"  # or "master"
+DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
+
+import requests
+
+@st.cache_data
+def list_csvs_from_github():
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}"
+    res = requests.get(url)
+    if res.status_code == 200:
+        files = res.json()
+        return [f['name'] for f in files if f['name'].endswith('.csv')]
+    else:
+        st.error("❌ GitHub repo or folder not found.")
+        return []
+
+
 # Add this import for formatting axis ticks
 from matplotlib.ticker import FuncFormatter
 
@@ -155,13 +175,32 @@ def main():
         else:
             st.sidebar.warning("No predictions to download.")
     
-    # Upload CSV files
-    with st.sidebar.expander("📂 Upload Data", expanded=False):
-        uploaded_files = st.file_uploader(
-            "Upload one or more CSV files",
-            type=["csv"],
-            accept_multiple_files=True
-        )
+  # Sidebar: Data Upload or GitHub Selection
+  st.sidebar.subheader("📁 Choose Data Source")
+  data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from GitHub"], index=0)
+  uploaded_files = []
+
+  if data_source == "Upload CSV":
+    uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
+
+  elif data_source == "Load from GitHub":
+    github_csvs = list_csvs_from_github()
+    if github_csvs:
+      selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
+      if selected_file:
+        raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
+        try:
+          df = pd.read_csv(raw_url)
+          # Fake upload-like object for consistency with session_state
+          fake_file = type('FakeUpload', (), {'name': selected_file})
+          uploaded_files.append(fake_file)
+          st.session_state['datasets'][selected_file] = df
+          st.session_state['predictions'][selected_file] = []
+          st.success(f"✅ Loaded from GitHub: {selected_file}")
+        except Exception as e:
+          st.error(f"Error loading CSV: {e}")
+    else:
+      st.warning("No CSV files found in GitHub folder.")
 
     # Read and store datasets
     for uploaded_file in uploaded_files:
