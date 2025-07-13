@@ -195,7 +195,8 @@ def main():
                     fake_file = type('FakeUpload', (), {'name': selected_file})
                     uploaded_files.append(fake_file)
                     st.session_state['datasets'][selected_file] = df
-                    st.session_state['predictions'][selected_file] = []
+                    if selected_file not in st.session_state['predictions']:
+                        st.session_state['predictions'][selected_file] = []
                     st.success(f"✅ Loaded from GitHub: {selected_file}")
                 except Exception as e:
                     st.error(f"Error loading CSV: {e}")
@@ -207,7 +208,8 @@ def main():
         if uploaded_file.name not in st.session_state['datasets']:
             df = pd.read_csv(uploaded_file)
             st.session_state['datasets'][uploaded_file.name] = df
-            st.session_state['predictions'][uploaded_file.name] = []
+            if uploaded_file.name not in st.session_state['predictions']:
+                st.session_state['predictions'][uploaded_file.name] = []
 
     # Cleanup stale datasets
     uploaded_names = {f.name for f in uploaded_files}
