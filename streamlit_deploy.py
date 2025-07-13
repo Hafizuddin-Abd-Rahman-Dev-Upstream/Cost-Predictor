@@ -342,18 +342,18 @@ def main():
     # EPCIC Row
     epcic_percentages = {}
     col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
-    epcic_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.5)
-    epcic_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=12.5)
-    epcic_percentages["Construction"] = col_ep3.number_input("Construction (%)", min_value=0.0, max_value=100.0, value=12.5)
-    epcic_percentages["Installation"] = col_ep4.number_input("Installation (%)", min_value=0.0, max_value=100.0, value=12.5)
-    epcic_percentages["Commissioning"] = col_ep5.number_input("Commissioning (%)", min_value=0.0, max_value=100.0, value=12.5)
+    epcic_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=0.0)
+    epcic_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=0.0)
+    epcic_percentages["Construction"] = col_ep3.number_input("Construction (%)", min_value=0.0, max_value=100.0, value=0.0)
+    epcic_percentages["Installation"] = col_ep4.number_input("Installation (%)", min_value=0.0, max_value=100.0, value=0.0)
+    epcic_percentages["Commissioning"] = col_ep5.number_input("Commissioning (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     # PRR Row
     prr_percentages = {}
     col_prr1, col_prr2, col_prr3, col_prr4, col_prr5 = st.columns(5)
-    prr_percentages["Preparation"] = col_prr1.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=12.5)
-    prr_percentages["Removal"] = col_prr2.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=12.5)
-    prr_percentages["Remediation"] = col_prr3.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=25.0)
+    prr_percentages["Preparation"] = col_prr1.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=0.0)
+    prr_percentages["Removal"] = col_prr2.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=0.0)
+    prr_percentages["Remediation"] = col_prr3.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     # Combined validation
     combined_total = sum(epcic_percentages.values()) + sum(prr_percentages.values())
@@ -367,22 +367,22 @@ def main():
     st.markdown("Enter the percentage for Pre-Development and Owner's Cost relative to the total predicted cost.")
     
     col_pd1, col_pd2 = st.columns(2)
-    predev_percentage = col_pd1.number_input("Pre-Development (%)", min_value=0.0, max_value=100.0, value=10.0)
-    owners_percentage = col_pd2.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=7.0)
+    predev_percentage = col_pd1.number_input("Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
+    owners_percentage = col_pd2.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     # Cost Contingency Input Section (default changed to 25%)
     st.subheader("⚠️ Cost Contingency Input")
     st.markdown("Enter the percentage for Cost Contingency relative to the sum of predicted cost and owner's cost.")
     
-    contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=25.0)
+    contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     # Escalation & Inflation Percentage Input Section
     st.subheader("📈 Escalation & Inflation Percentage Input")
     st.markdown("Enter the percentage for Escalation & Inflation relative to the sum of predicted cost and owner's cost.")
     
-    escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=10.408)
+    escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
 
-    st.markdown("**Escalation inflation is based on assumption of 2% rate per year for 5 years regardless of year, equivalent to 10.4% compounded rate, applied to EPRR and Owners Cost for ABEX estimation.*")
+    st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
     
     st.header('Make New Predictions')
     project_name = st.text_input('Enter Project Name')
