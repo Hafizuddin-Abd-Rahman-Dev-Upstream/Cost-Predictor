@@ -31,8 +31,6 @@ REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
 DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
 
-import requests
-
 @st.cache_data
 def list_csvs_from_github():
     url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}"
