@@ -211,12 +211,14 @@ def main():
             if uploaded_file.name not in st.session_state['predictions']:
                 st.session_state['predictions'][uploaded_file.name] = []
 
-    # Cleanup stale datasets
-    uploaded_names = {f.name for f in uploaded_files}
-    for name in list(st.session_state['datasets'].keys()):
-        if name not in uploaded_names:
-            del st.session_state['datasets'][name]
-            st.session_state['predictions'].pop(name, None)
+    # ✅ Place the gated cleanup block here (same indentation as other top-level `if` statements)
+    if st.sidebar.checkbox("🧹 Cleanup missing datasets from session", value=False,
+                           help="Enable this if you want to remove datasets not uploaded in this session."):
+        uploaded_names = {f.name for f in uploaded_files}
+        for name in list(st.session_state['datasets'].keys()):
+            if name not in uploaded_names:
+                del st.session_state['datasets'][name]
+                st.session_state['predictions'].pop(name, None)
 
     if not st.session_state['datasets']:
         st.write("Please upload one or more CSV files to begin.")
