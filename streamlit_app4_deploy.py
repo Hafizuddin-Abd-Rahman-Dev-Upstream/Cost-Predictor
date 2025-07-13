@@ -16,6 +16,7 @@ import numpy as np
 from scipy.stats import linregress
 from sklearn.impute import KNNImputer
 import io
+import requests
 
 # Set page config
 st.set_page_config(
