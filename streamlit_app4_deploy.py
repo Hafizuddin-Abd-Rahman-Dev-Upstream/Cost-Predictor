@@ -27,7 +27,7 @@ st.set_page_config(
 
 # GitHub Repo Configuration (set these to your actual values)
 GITHUB_USER = "apizrahman24"
-REPO_NAME = "Cost-predictor"
+REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
 DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
 
