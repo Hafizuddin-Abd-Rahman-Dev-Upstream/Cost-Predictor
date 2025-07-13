@@ -34,13 +34,14 @@ import requests
 
 @st.cache_data
 def list_csvs_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}"
-    res = requests.get(url)
+    headers = {"Authorization": f"token {st.secrets['github_token']}"}
+    res = requests.get(raw_url, headers=headers)
+    df = pd.read_csv(io.StringIO(res.text))
     if res.status_code == 200:
         files = res.json()
         return [f['name'] for f in files if f['name'].endswith('.csv')]
     else:
-        st.error("❌ GitHub repo or folder not found.")
+        st.error("❌ GitHub repo or folder not found or token invalid.")
         return []
 
 
