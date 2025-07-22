@@ -2,7 +2,7 @@ import streamlit as st
 
 # Set page config
 st.set_page_config(
-    page_title="Welcome | Cost Prediction RT2025",
+    page_title="Welcome | CE AI Homepage",
     page_icon="💲",
     layout="centered",
     initial_sidebar_state="collapsed"
@@ -13,12 +13,17 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    password = st.text_input("🔐 Enter Access Password", type="password")
-    if password == st.secrets["password"]:  # You will define 'password' in .streamlit/secrets.toml
-        st.session_state.authenticated = True
-        st.success("✅ Access granted")
-    elif password:
-        st.error("❌ Incorrect password")
+    with st.form("login_form"):
+        password = st.text_input("🔐 Enter Access Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+        if submitted:
+            if password == st.secrets["password"]:  # Define 'password' in .streamlit/secrets.toml
+                st.session_state.authenticated = True
+                st.success("✅ Access granted")
+                st.experimental_rerun()
+            else:
+                st.error("❌ Incorrect password")
     st.stop()
 
 # Welcome Page Content
