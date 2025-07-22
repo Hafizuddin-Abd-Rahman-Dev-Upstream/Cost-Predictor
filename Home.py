@@ -32,7 +32,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # Welcome Page Content
-st.title("💲 Welcome to Cost Prediction RT2025")
+st.title("Welcome to CE AI Tools Homepage")
 st.markdown("""
 ---
 
