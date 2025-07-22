@@ -19,7 +19,7 @@ import io
 
 # Set page config
 st.set_page_config(
-    page_title="Cost Prediction RT2025",
+    page_title="ABEX AI RT2025",
     page_icon="💲",
     initial_sidebar_state="expanded"
 )
@@ -28,7 +28,7 @@ st.set_page_config(
 GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
-DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
+DATA_FOLDER = "data_ABEX"  # the folder inside your repo that holds the CSVs
 
 import requests
 
