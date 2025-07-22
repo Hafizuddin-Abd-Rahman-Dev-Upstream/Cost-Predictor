@@ -28,7 +28,7 @@ st.set_page_config(
 GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
-DATA_FOLDER = "data_CAPEX"  # the folder inside your repo that holds the CSVs
+DATA_FOLDER = "pages/data_CAPEX"  # the folder inside your repo that holds the CSVs
 
 import requests
 
