@@ -5,11 +5,21 @@ st.set_page_config(
     page_title="Welcome | Cost Prediction RT2025",
     page_icon="💲",
     layout="centered",
-    initial_sidebar_state="collapsed"  # keep sidebar collapsed initially but still available
+    initial_sidebar_state="collapsed"
 )
 
-# Remove the CSS that hides the sidebar
-# (So sidebar with page links will be visible)
+# Password protection
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    password = st.text_input("🔐 Enter Access Password", type="password")
+    if password == st.secrets["app_password"]:  # You will define 'app_password' in .streamlit/secrets.toml
+        st.session_state.authenticated = True
+        st.success("✅ Access granted")
+    elif password:
+        st.error("❌ Incorrect password")
+    st.stop()
 
 # Welcome Page Content
 st.title("💲 Welcome to Cost Prediction RT2025")
