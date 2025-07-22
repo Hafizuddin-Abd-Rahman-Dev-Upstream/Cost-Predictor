@@ -152,6 +152,10 @@ def main():
         else:
             st.sidebar.warning("No predictions to download.")
     
+    # 🔄 Add GitHub CSV list refresh button
+    if st.sidebar.button("🔄 Refresh GitHub File List"):
+        list_csvs_from_github.clear()
+    
     # Sidebar: Data Upload or GitHub Selection
     st.sidebar.subheader("📁 Choose Data Source")
     data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from GitHub"], index=0)
