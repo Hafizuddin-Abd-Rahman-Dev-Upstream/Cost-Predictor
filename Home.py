@@ -14,7 +14,7 @@ if "authenticated" not in st.session_state:
 
 if not st.session_state.authenticated:
     password = st.text_input("🔐 Enter Access Password", type="password")
-    if password == st.secrets["app_password"]:  # You will define 'app_password' in .streamlit/secrets.toml
+    if password == st.secrets["password"]:  # You will define 'password' in .streamlit/secrets.toml
         st.session_state.authenticated = True
         st.success("✅ Access granted")
     elif password:
