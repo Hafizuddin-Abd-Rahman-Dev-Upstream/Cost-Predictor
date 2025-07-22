@@ -124,7 +124,7 @@ def download_all_predictions():
     )
 
 def main():
-    st.title('💲Cost Prediction RT2025💲')
+    st.title('💲ABEX AI RT2025💲')
     
     # Initialize session state variables
     if 'datasets' not in st.session_state:
