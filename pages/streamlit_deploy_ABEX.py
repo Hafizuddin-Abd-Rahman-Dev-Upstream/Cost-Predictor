@@ -62,29 +62,6 @@ def human_format(num, pos=None):
 def format_with_commas(num):
     return f"{num:,.2f}"
 
-# Check if the user is authenticated with just a password
-def check_password():
-    """Returns `True` if the user had the correct password."""
-
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if st.session_state["password"] == st.secrets["password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store the password
-        else:
-            st.session_state["password_correct"] = False
-
-    # Return True if the password is validated.
-    if "password_correct" in st.session_state:
-        return st.session_state["password_correct"]
-
-    # Show input for password only.
-    st.text_input("Password", type="password", key="password")
-    st.button("Login", on_click=password_entered)
-
-    # Return False if the password is wrong or not yet validated.
-    return False
-
 def get_currency_symbol(df):
     """Extract currency symbol from column names or return default"""
     for col in df.columns:
@@ -624,13 +601,9 @@ def main():
     else:
         st.write("No predictions available.")
 
-# Entry point
 if __name__ == '__main__':
-    # First check if the user is authenticated with just a password
-    if check_password():
-        main()
-    else:
-        st.error("Please enter the correct password to access the Cost Prediction Tool")
+    main()
+
 
 
 # In[ ]:
