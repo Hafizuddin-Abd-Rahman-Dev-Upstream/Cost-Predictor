@@ -38,7 +38,7 @@ st.markdown("""
 
 ### 👋 Hello and Welcome!
 
-This application helps you perform intelligent **project cost estimations** and breakdowns based on historical and real-time input data.
+This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
 
 Please navigate to the desired module using the sidebar (top left corner) to begin.
 
