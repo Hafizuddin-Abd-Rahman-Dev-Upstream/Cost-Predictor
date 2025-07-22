@@ -19,7 +19,7 @@ import io
 
 # Set page config
 st.set_page_config(
-    page_title="CAPEX AI RT2025",
+    page_title="ABEX AI RT2025",
     page_icon="💲",
     initial_sidebar_state="expanded"
 )
@@ -28,7 +28,7 @@ st.set_page_config(
 GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"  # or "master"
-DATA_FOLDER = "data"  # the folder inside your repo that holds the CSVs
+DATA_FOLDER = "data_ABEX"  # the folder inside your repo that holds the CSVs
 
 import requests
 
@@ -61,29 +61,6 @@ def human_format(num, pos=None):
 # Function to format numbers with commas
 def format_with_commas(num):
     return f"{num:,.2f}"
-
-# Check if the user is authenticated with just a password
-def check_password():
-    """Returns `True` if the user had the correct password."""
-
-    def password_entered():
-        """Checks whether a password entered by the user is correct."""
-        if st.session_state["password"] == st.secrets["password"]:
-            st.session_state["password_correct"] = True
-            del st.session_state["password"]  # Don't store the password
-        else:
-            st.session_state["password_correct"] = False
-
-    # Return True if the password is validated.
-    if "password_correct" in st.session_state:
-        return st.session_state["password_correct"]
-
-    # Show input for password only.
-    st.text_input("Password", type="password", key="password")
-    st.button("Login", on_click=password_entered)
-
-    # Return False if the password is wrong or not yet validated.
-    return False
 
 def get_currency_symbol(df):
     """Extract currency symbol from column names or return default"""
@@ -624,13 +601,9 @@ def main():
     else:
         st.write("No predictions available.")
 
-# Entry point
 if __name__ == '__main__':
-    # First check if the user is authenticated with just a password
-    if check_password():
-        main()
-    else:
-        st.error("Please enter the correct password to access the Cost Prediction Tool")
+    main()
+
 
 
 # In[ ]:
