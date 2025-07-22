@@ -19,7 +19,7 @@ import io
 
 # Set page config
 st.set_page_config(
-    page_title="Cost Prediction RT2025",
+    page_title="CAPEX AI RT2025",
     page_icon="💲",
     initial_sidebar_state="expanded"
 )
