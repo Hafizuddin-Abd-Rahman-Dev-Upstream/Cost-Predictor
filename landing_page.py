@@ -5,17 +5,11 @@ st.set_page_config(
     page_title="Welcome | Cost Prediction RT2025",
     page_icon="💲",
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="collapsed"  # keep sidebar collapsed initially but still available
 )
 
-# Optional: Hide the sidebar completely on this page
-hide_sidebar = """
-    <style>
-        [data-testid="stSidebar"] { display: none !important; }
-        [data-testid="collapsedControl"] { display: none !important; }
-    </style>
-"""
-st.markdown(hide_sidebar, unsafe_allow_html=True)
+# Remove the CSS that hides the sidebar
+# (So sidebar with page links will be visible)
 
 # Welcome Page Content
 st.title("💲 Welcome to Cost Prediction RT2025")
