@@ -2,7 +2,7 @@ import streamlit as st
 
 # Set page config
 st.set_page_config(
-    page_title="Welcome to CE AI Tools Homepage",
+    page_title="CE AI Tools",
     page_icon="💲",
     layout="centered",
     initial_sidebar_state="collapsed"
