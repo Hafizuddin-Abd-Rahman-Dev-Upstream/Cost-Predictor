@@ -320,30 +320,24 @@ def main():
     # MOVED SECTIONS: Cost Breakdown Configuration
     st.header('Cost Breakdown Configuration')
     
-    # Cost Breakdown Percentage Input Section (EPCIC & PRR)
+    # Cost Breakdown Percentage Input Section (EPRR only)
     st.subheader("🔧 Cost Breakdown Percentage Input")
     st.markdown("Enter the percentage breakdown for the following categories. Total must equal 100%. You may leave the input to 0% if unapplicable.")
     
-    # EPCIC Row
-    epcic_percentages = {}
+    # EPRR Row
+    eprr_percentages = {}
     col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
-    epcic_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=0.0)
-    epcic_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=0.0)
-    epcic_percentages["Construction"] = col_ep3.number_input("Construction (%)", min_value=0.0, max_value=100.0, value=0.0)
-    epcic_percentages["Installation"] = col_ep4.number_input("Installation (%)", min_value=0.0, max_value=100.0, value=0.0)
-    epcic_percentages["Commissioning"] = col_ep5.number_input("Commissioning (%)", min_value=0.0, max_value=100.0, value=0.0)
-    
-    # PRR Row
-    prr_percentages = {}
-    col_prr1, col_prr2, col_prr3, col_prr4, col_prr5 = st.columns(5)
-    prr_percentages["Preparation"] = col_prr1.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=0.0)
-    prr_percentages["Removal"] = col_prr2.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=0.0)
-    prr_percentages["Remediation"] = col_prr3.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=0.0)
+    eprr_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=0.0)
+    eprr_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=0.0)
+    eprr_percentages["Removal"] = col_ep3.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=0.0)
+    eprr_percentages["Remediation"] = col_ep4.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=0.0)
+    # Leave the 5th column empty or add a placeholder
+    col_ep5.write("")  # Empty column for spacing
     
     # Combined validation
-    combined_total = sum(epcic_percentages.values()) + sum(prr_percentages.values())
-    if abs(combined_total - 100.0) > 1e-3:
-        st.warning(f"⚠️ Total input is {combined_total:.2f}%. Please ensure it sums to 100% if applicable.")
+    eprr_total = sum(eprr_percentages.values())
+    if abs(eprr_total - 100.0) > 1e-3 and eprr_total > 0:
+        st.warning(f"⚠️ Total EPRR input is {eprr_total:.2f}%. Please ensure it sums to 100% if applicable.")
 
     st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for execution packages percentage breakdown by facilities and project types.*")
     
@@ -355,25 +349,39 @@ def main():
     predev_percentage = col_pd1.number_input("Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
     owners_percentage = col_pd2.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0)
     
-    # Cost Contingency Input Section (default changed to 25%)
-    st.subheader("⚠️ Cost Contingency Input")
-    st.markdown("Enter the percentage for Cost Contingency relative to the sum of predicted cost and owner's cost.")
+    # Cost Contingency and Escalation & Inflation Input Section (in one row)
+    st.subheader("⚠️ Cost Contingency & 📈 Escalation & Inflation Input")
+    col_cont1, col_cont2 = st.columns(2)
     
-    contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
+    with col_cont1:
+        st.markdown("Enter the percentage for Cost Contingency relative to the sum of predicted cost and owner's cost.")
+        contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
     
-    # Escalation & Inflation Percentage Input Section
-    st.subheader("📈 Escalation & Inflation Percentage Input")
-    st.markdown("Enter the percentage for Escalation & Inflation relative to the sum of predicted cost and owner's cost.")
-    
-    escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
+    with col_cont2:
+        st.markdown("Enter the percentage for Escalation & Inflation relative to the sum of predicted cost and owner's cost.")
+        escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
 
     st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
     
     st.header('Make New Predictions')
     project_name = st.text_input('Enter Project Name')
+    
+    # Create input fields in one row
     new_data = {}
-    for col in X.columns:
-        new_data[col] = st.number_input(f'{col}', value=float(X[col].mean()))
+    num_cols = len(X.columns)
+    cols_per_row = min(num_cols, 5)  # Maximum 5 columns per row
+    
+    # Calculate number of rows needed
+    num_rows = (num_cols + cols_per_row - 1) // cols_per_row
+    
+    for row in range(num_rows):
+        columns = st.columns(cols_per_row)
+        for col_idx in range(cols_per_row):
+            feature_idx = row * cols_per_row + col_idx
+            if feature_idx < num_cols:
+                col_name = X.columns[feature_idx]
+                with columns[col_idx]:
+                    new_data[col_name] = st.number_input(f'{col_name}', value=float(X[col_name].mean()), key=f'input_{col_name}')
 
     if st.button('Predict'):
         df_input = pd.DataFrame([new_data])
@@ -381,19 +389,12 @@ def main():
         pred = rf_model.predict(input_scaled)[0]
         result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
         
-        # Add EPCIC breakdown to result
-        epcic_breakdown = {}
-        for phase, percent in epcic_percentages.items():
+        # Add EPRR breakdown to result
+        eprr_breakdown = {}
+        for phase, percent in eprr_percentages.items():
             cost = round(pred * (percent / 100), 2)
             result[f"{phase} Cost"] = cost
-            epcic_breakdown[phase] = {'cost': cost, 'percentage': percent}
-        
-        # Add PRR breakdown to result
-        prr_breakdown = {}
-        for phase, percent in prr_percentages.items():
-            cost = round(pred * (percent / 100), 2)
-            result[f"{phase} Cost"] = cost
-            prr_breakdown[phase] = {'cost': cost, 'percentage': percent}
+            eprr_breakdown[phase] = {'cost': cost, 'percentage': percent}
         
         # Add Pre-Dev and Owner's Cost breakdown to result
         predev_cost = round(pred * (predev_percentage / 100), 2)
@@ -421,21 +422,15 @@ def main():
         display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
         
         # Check if any breakdown percentages are greater than 0
-        has_breakdown = any(data['percentage'] > 0 for data in epcic_breakdown.values()) or \
-                       any(data['percentage'] > 0 for data in prr_breakdown.values()) or \
+        has_breakdown = any(data['percentage'] > 0 for data in eprr_breakdown.values()) or \
                        predev_percentage > 0 or owners_percentage > 0 or \
                        contingency_percentage > 0 or escalation_percentage > 0
         
         if has_breakdown:
-            # Add EPCIC breakdown (only if percentage > 0)
-            for phase, data in epcic_breakdown.items():
+            # Add EPRR breakdown (only if percentage > 0)
+            for phase, data in eprr_breakdown.items():
                 if data['percentage'] > 0:
                     display_text += f"• {phase} ({data['percentage']:.1f}%): {format_currency(data['cost'], currency)}\n\n"
-            
-            # Add PRR breakdown (only if percentage > 0)  
-            for phase, data in prr_breakdown.items():
-                if data['percentage'] > 0:
-                    display_text += f"• {phase} ({data['percentage']:.2f}%): {format_currency(data['cost'], currency)}\n\n"
             
             # Add other cost items (each on separate line, only if percentage > 0)
             if predev_percentage > 0:
@@ -470,13 +465,8 @@ def main():
                     entry.update(row[X.columns].to_dict())
                     entry[target_column] = round(preds[i], 2)
                     
-                    # Add EPCIC breakdown for batch predictions
-                    for phase, percent in epcic_percentages.items():
-                        cost = round(preds[i] * (percent / 100), 2)
-                        entry[f"{phase} Cost"] = cost
-
-                    # Add PRR breakdown for batch predictions
-                    for phase, percent in prr_percentages.items():
+                    # Add EPRR breakdown for batch predictions
+                    for phase, percent in eprr_percentages.items():
                         cost = round(preds[i] * (percent / 100), 2)
                         entry[f"{phase} Cost"] = cost
                     
@@ -505,62 +495,6 @@ def main():
                 st.success("Batch prediction successful!")
             else:
                 st.error("Excel missing required columns.")
-
-    # Updated Cost Curve section with predictions overlay
-    st.subheader('📈 Cost Curve with Predictions')
-    feature = st.selectbox('Cost Curve Dropdown Menu', X.columns, key='cost_curve_feature')
-
-    fig, ax = plt.subplots(figsize=(7, 6))
-
-    # Original data
-    x_vals = df_imputed[feature].values
-    y_vals = y.values
-    mask = (x_vals > 0) & (y_vals > 0)
-
-    if mask.sum() >= 2:
-        log_x = np.log(x_vals[mask])
-        log_y = np.log(y_vals[mask])
-        slope, intercept, r_val, _, _ = linregress(log_x, log_y)
-        a = np.exp(intercept)
-        b = slope
-        sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
-        x_line = np.linspace(min(x_vals[mask]), max(x_vals[mask]), 100)
-        y_line = a * (x_line ** b)
-        ax.plot(x_line, y_line, color='red', label=f'Fit: y = {a:.2f} * x^{b:.2f}')
-        ax.text(0.05, 0.95, f'$R^2$ = {r_val**2:.3f}', transform=ax.transAxes,
-                verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-    else:
-        sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
-        st.warning("Not enough data for regression.")
-
-    # Predictions overlay
-    prediction_data = st.session_state['predictions'].get(selected_dataset_name, [])
-    if prediction_data:
-        df_preds = pd.DataFrame(prediction_data)
-        if feature in df_preds.columns and target_column in df_preds.columns:
-            sns.scatterplot(
-                data=df_preds,
-                x=feature,
-                y=target_column,
-                marker='X',
-                s=100,
-                color='green',
-                label='Predictions',
-                ax=ax
-            )
-
-    ax.set_xlabel(feature)
-    ax.set_ylabel(target_column)
-    ax.set_title(f'Cost Curve: {feature} vs {target_column}')
-    ax.legend()
-
-    # Apply human-readable format to axis labels
-    ax.xaxis.set_major_formatter(FuncFormatter(human_format))
-    ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-
-    plt.tight_layout()
-    st.pyplot(fig)
-    plt.close()
 
     # Project list & delete buttons
     with st.expander('Simplified Project List', expanded=True):
