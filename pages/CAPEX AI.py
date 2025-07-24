@@ -391,13 +391,13 @@ def main():
     
     # Create columns for input fields based on the number of features
     num_features = len(X.columns)
-    if num_features <= 5:
+    if num_features <= 3:
         cols = st.columns(num_features)
     else:
-        # If more than 5 features, create multiple rows
+        # If more than 3 features, create multiple rows
         cols = []
-        for i in range(0, num_features, 5):
-            row_cols = st.columns(min(5, num_features - i))
+        for i in range(0, num_features, 3):
+            row_cols = st.columns(min(3, num_features - i))
             cols.extend(row_cols)
     
     new_data = {}
