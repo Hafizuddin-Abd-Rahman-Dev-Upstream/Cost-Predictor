@@ -392,7 +392,7 @@ def main():
     # Create input fields in one row
     new_data = {}
     num_cols = len(X.columns)
-    cols_per_row = min(num_cols, 5)  # Maximum 5 columns per row
+    cols_per_row = min(num_cols, 2)  # Maximum 2 columns per row
     
     # Calculate number of rows needed
     num_rows = (num_cols + cols_per_row - 1) // cols_per_row
