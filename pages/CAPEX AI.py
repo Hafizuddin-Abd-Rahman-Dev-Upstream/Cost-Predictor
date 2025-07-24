@@ -24,6 +24,29 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Password protection
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+# Graceful handling if password is not set
+correct_password = st.secrets.get("password", None)
+
+if not st.session_state.authenticated:
+    with st.form("login_form"):
+        password = st.text_input("🔐 Enter Access Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+        if submitted:
+            if correct_password is None:
+                st.error("🚫 Password not configured. Please contact admin.")
+            elif password == correct_password:
+                st.session_state.authenticated = True
+                st.success("✅ Access granted")
+                st.rerun()
+            else:
+                st.error("❌ Incorrect password")
+    st.stop()
+
 # GitHub Repo Configuration (set these to your actual values)
 GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
