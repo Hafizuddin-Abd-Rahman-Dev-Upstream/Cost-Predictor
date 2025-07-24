@@ -345,7 +345,7 @@ def main():
     
     # Cost Breakdown Percentage Input Section (EPCIC only)
     st.subheader("🔧 Cost Breakdown Percentage Input")
-    st.markdown("Enter the percentage breakdown for the following categories. Total must equal 100%. You may leave the input to 0% if unapplicable.")
+    st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
     
     # EPCIC Row
     epcic_percentages = {}
@@ -361,11 +361,11 @@ def main():
     if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
         st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
 
-    st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for execution packages percentage breakdown by facilities and project types.*")
+    st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
     
     # Pre-Dev and Owner's Cost Percentage Input Section
     st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
-    st.markdown("Enter the percentage for Pre-Development and Owner's Cost relative to the total predicted cost.")
+    st.markdown("Enter the percentage for Pre-Development and Owner's Cost for the project.")
     
     col_pd1, col_pd2 = st.columns(2)
     predev_percentage = col_pd1.number_input("Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
@@ -376,12 +376,12 @@ def main():
     
     with col_cont1:
         st.subheader("⚠️ Cost Contingency Input")
-        st.markdown("Enter the percentage for Cost Contingency relative to the sum of predicted cost and owner's cost.")
+        st.markdown("Enter the percentage for Cost Contingency for the project.")
         contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     with col_cont2:
         st.subheader("📈 Escalation & Inflation Percentage Input")
-        st.markdown("Enter the percentage for Escalation & Inflation relative to the sum of predicted cost and owner's cost.")
+        st.markdown("Enter the percentage for Escalation & Inflation for the project.")
         escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
 
     st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
