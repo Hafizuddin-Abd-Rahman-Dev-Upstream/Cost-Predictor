@@ -365,7 +365,7 @@ def main():
     
     # Pre-Dev and Owner's Cost Percentage Input Section
     st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
-    st.markdown("Enter the percentage for Pre-Development and Owner's Cost for the project.")
+    st.markdown("")
     
     col_pd1, col_pd2 = st.columns(2)
     predev_percentage = col_pd1.number_input("Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
@@ -376,12 +376,12 @@ def main():
     
     with col_cont1:
         st.subheader("⚠️ Cost Contingency Input")
-        st.markdown("Enter the percentage for Cost Contingency for the project.")
+        st.markdown("")
         contingency_percentage = st.number_input("Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
     
     with col_cont2:
         st.subheader("📈 Escalation & Inflation Percentage Input")
-        st.markdown("Enter the percentage for Escalation & Inflation for the project.")
+        st.markdown("")
         escalation_percentage = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
 
     st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
