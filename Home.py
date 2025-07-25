@@ -60,8 +60,8 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Optional: Show logo in sidebar if you have 'logo.jpeg'
-st.sidebar.markdown('<div class="sidebar-logo"><img src="logo.jpeg" width="140"></div>', unsafe_allow_html=True)
+# Optional: Show logo in sidebar if you have 'logo.png'
+# st.sidebar.markdown('<div class="sidebar-logo"><img src="logo.png" width="140"></div>', unsafe_allow_html=True)
 
 # Password protection
 if "authenticated" not in st.session_state:
