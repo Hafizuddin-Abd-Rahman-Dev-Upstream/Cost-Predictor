@@ -5,7 +5,7 @@ st.set_page_config(
     page_title="CE AI Tools",
     page_icon="💲",
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Custom CSS for professional styling with #00B1A9 theme
@@ -117,39 +117,8 @@ st.markdown("""
     }
     
     /* Sidebar styling */
-    .css-1d391kg, [data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #00B1A9, #008B85) !important;
-    }
-    
-    /* Sidebar content styling */
-    .css-1d391kg .css-17eq0hr, [data-testid="stSidebar"] .css-17eq0hr {
-        color: white !important;
-    }
-    
-    /* Sidebar button styling */
-    [data-testid="stSidebar"] .stButton > button {
-        background: rgba(255, 255, 255, 0.2) !important;
-        color: white !important;
-        border: 1px solid rgba(255, 255, 255, 0.3) !important;
-        border-radius: 10px !important;
-        margin: 0.2rem 0 !important;
-        font-weight: 500 !important;
-        transition: all 0.3s ease !important;
-    }
-    
-    [data-testid="stSidebar"] .stButton > button:hover {
-        background: rgba(255, 255, 255, 0.3) !important;
-        border-color: rgba(255, 255, 255, 0.5) !important;
-        transform: translateX(5px) !important;
-    }
-    
-    /* Sidebar text styling */
-    [data-testid="stSidebar"] .stMarkdown {
-        color: white !important;
-    }
-    
-    [data-testid="stSidebar"] .stMarkdown p {
-        color: rgba(255, 255, 255, 0.9) !important;
+    .css-1d391kg {
+        background: linear-gradient(180deg, #00B1A9, #008B85);
     }
     
     /* Success/Error message styling */
@@ -198,6 +167,60 @@ st.markdown("""
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     header {visibility: hidden;}
+    
+    /* Sidebar toggle button styling - make it white and always visible */
+    button[kind="header"] {
+        color: white !important;
+        background-color: rgba(255, 255, 255, 0.2) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 8px !important;
+        padding: 0.5rem !important;
+        margin: 0.5rem !important;
+        transition: all 0.3s ease !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+    
+    button[kind="header"]:hover {
+        background-color: rgba(255, 255, 255, 0.3) !important;
+        border-color: rgba(255, 255, 255, 0.5) !important;
+        transform: scale(1.05) !important;
+    }
+    
+    /* Sidebar toggle icon styling */
+    button[kind="header"] svg {
+        color: white !important;
+        fill: white !important;
+    }
+    
+    /* Header toolbar styling */
+    .stApp > header[data-testid="stHeader"] {
+        background: transparent !important;
+        height: auto !important;
+    }
+    
+    /* Alternative selector for sidebar button */
+    [data-testid="collapsedControl"] {
+        color: white !important;
+        background-color: rgba(255, 255, 255, 0.2) !important;
+        border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        border-radius: 8px !important;
+        padding: 0.5rem !important;
+        margin: 0.5rem !important;
+        opacity: 1 !important;
+        visibility: visible !important;
+    }
+    
+    [data-testid="collapsedControl"]:hover {
+        background-color: rgba(255, 255, 255, 0.3) !important;
+        border-color: rgba(255, 255, 255, 0.5) !important;
+        transform: scale(1.05) !important;
+    }
+    
+    [data-testid="collapsedControl"] svg {
+        color: white !important;
+        fill: white !important;
+    }
     
     /* Custom scrollbar */
     ::-webkit-scrollbar {
@@ -253,43 +276,6 @@ if not st.session_state.authenticated:
 
 # Welcome Page Content
 st.title("🚀 CE AI Tools")
-
-# Add sidebar navigation
-with st.sidebar:
-    st.markdown("## 📊 Navigation Menu")
-    st.markdown("---")
-    
-    # Sample navigation items
-    if st.button("🏠 Home", use_container_width=True):
-        st.write("You're already on the home page!")
-    
-    if st.button("📂 Data Upload", use_container_width=True):
-        st.write("Navigate to Data Upload module")
-    
-    if st.button("🤖 AI Predictions", use_container_width=True):
-        st.write("Navigate to AI Predictions module")
-    
-    if st.button("📈 Cost Analysis", use_container_width=True):
-        st.write("Navigate to Cost Analysis module")
-    
-    if st.button("📊 Visualizations", use_container_width=True):
-        st.write("Navigate to Visualizations module")
-    
-    if st.button("📤 Export Results", use_container_width=True):
-        st.write("Navigate to Export module")
-    
-    st.markdown("---")
-    st.markdown("### 🔧 Settings")
-    if st.button("⚙️ Configuration", use_container_width=True):
-        st.write("Navigate to Settings")
-    
-    if st.button("🔐 Account", use_container_width=True):
-        st.write("Navigate to Account Settings")
-    
-    st.markdown("---")
-    st.markdown("### 📞 Support")
-    st.markdown("Need help? Contact your administrator")
-    st.markdown("📧 support@ceaitools.com")
 
 # Welcome section
 st.markdown("""
