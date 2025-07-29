@@ -95,7 +95,7 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Animated Header with Navy Blue Color
+# Animated Header with Navy Blue Color (no glow)
 st.markdown("""
 <div style="text-align: center; margin: 2rem 0;" class="animated-header">
     <h1 style="
@@ -103,7 +103,6 @@ st.markdown("""
         font-size: 3.5rem;
         font-weight: 700;
         color: #1e3a8a;
-        text-shadow: 0 4px 8px rgba(30, 58, 138, 0.3);
         margin-bottom: 1rem;
         letter-spacing: -1px;
     ">
@@ -127,7 +126,7 @@ st.markdown(
 st.markdown("""
 <div style="text-align: center; margin: 1.5rem 0;">
     <p style="font-size: 1.4rem; font-weight: bold; color: #1e3a8a; margin-bottom: 1rem;">
-        Smart Cost Estimation Made Simple
+        "Smart Cost Estimation Made Simple"
     </p>
     <p style="font-size: 1.1rem; color: #555; line-height: 1.6;">
         Welcome to the AI-Powered Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
@@ -137,12 +136,9 @@ st.markdown("""
 
 st.markdown("""
 ---
-## 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
-This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
-Please use the sidebar to navigate modules.
----
-## 🔐 Access Control
-Password-protected pages available. Contact administrator for access.
+<p style="font-size: 0.9rem; color: #666; text-align: center;">
+    <span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact administrator for access.
+</p>
 ---
 """, unsafe_allow_html=True)
 
