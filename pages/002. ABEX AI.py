@@ -139,7 +139,7 @@ def main():
             st.sidebar.success("All predictions compiled successfully!")
         else:
             st.sidebar.warning("No predictions to download.")
-    if st.sidebar.button("🔄 Refresh GitHub File List"):
+    if st.sidebar.button("🔄 Refresh GitHub System"):
         list_csvs_from_github.clear()
 
     st.sidebar.subheader("📁 Choose Data Source")
