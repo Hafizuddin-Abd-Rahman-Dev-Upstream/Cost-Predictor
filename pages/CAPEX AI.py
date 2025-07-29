@@ -143,7 +143,7 @@ def main():
     uploaded_files = []
     if data_source == "Upload CSV":
         uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
-    elif data_source == "Load from GitHub":
+    elif data_source == "Load from Server":
         github_csvs = list_csvs_from_github()
         if github_csvs:
             selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
