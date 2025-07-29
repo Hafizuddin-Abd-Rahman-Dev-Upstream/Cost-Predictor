@@ -130,7 +130,7 @@ st.markdown("""
 
 .emoji-pulse {
     display: inline-block;
-    animation: pulse 2s ease-in-out infinite;
+    animation: pulse 5s ease-in-out infinite;
 }
 </style>
 
