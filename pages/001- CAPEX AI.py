@@ -139,7 +139,7 @@ def main():
     if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
     st.sidebar.subheader("📁 Choose Data Source")
-    data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from GitHub"], index=0)
+    data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load Server"], index=0)
     uploaded_files = []
     if data_source == "Upload CSV":
         uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
