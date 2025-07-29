@@ -102,7 +102,7 @@ st.markdown("""
         margin-bottom: 0.5rem;
         letter-spacing: -1px;
     ">
-        💲 CE AI Tools
+        💲 CE AI Tools 💲
     </h1>
     <div style="
         width: 80px;
