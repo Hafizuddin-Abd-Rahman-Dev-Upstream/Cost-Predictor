@@ -143,7 +143,7 @@ st.markdown("""
         margin-bottom: 0.5rem;
         letter-spacing: -1px;
     " class="gradient-text">
-        <span class="emoji-pulse">💲</span> CE AI Tools </span>💲
+        💲</span> CE AI Tools </span>💲
     </h1>
     <div style="
         width: 500px;
