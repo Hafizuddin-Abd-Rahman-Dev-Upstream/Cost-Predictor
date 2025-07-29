@@ -117,7 +117,7 @@ logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/l
 st.markdown(
     f"""
     <div style="display: flex; justify-content: center; align-items: center;">
-        <img src="{logo_url}" width="150">
+        <img src="{logo_url}" width="200">
     </div>
     """,
     unsafe_allow_html=True
