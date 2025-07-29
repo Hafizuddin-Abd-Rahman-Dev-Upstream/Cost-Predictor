@@ -146,7 +146,7 @@ st.markdown("""
         💲</span> CE AI Tools </span>💲
     </h1>
     <div style="
-        width: 500px;
+        width: 100px;
         height: 4px;
         background: linear-gradient(90deg, #00B1A9, #00E5D6);
         margin: 0 auto;
