@@ -106,7 +106,7 @@ st.markdown("""
         margin-bottom: 1rem;
         letter-spacing: -1px;
     ">
-        💲 CE AI Tools
+        💲 CE AI Tools 💲
     </h1>
 </div>
 """, unsafe_allow_html=True)
