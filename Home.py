@@ -75,7 +75,7 @@ if not st.session_state.authenticated:
         st.markdown("#### 🔐 <span style='color:#00B1A9;'>Access Required</span>", unsafe_allow_html=True)
         password = st.text_input("Enter Access Password", type="password")
         submitted = st.form_submit_button("Login")
-
+        
         if submitted:
             if correct_password is None:
                 st.error("🚫 Password not configured. Please contact admin.")
@@ -90,8 +90,8 @@ if not st.session_state.authenticated:
 # Title
 st.title("💲 CE AI Tools")
 
-# ✅ Updated GIF section using the correct parameter
-gif_url = "https://github.com/apizrahman24/Cost-Predictor/blob/main/cat.gif"  # Replace with your actual URL
+# ✅ FIXED: Using the correct raw GitHub URL for the GIF
+gif_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/cat.gif"
 st.image(gif_url, use_container_width=True)
 
 # Footer
