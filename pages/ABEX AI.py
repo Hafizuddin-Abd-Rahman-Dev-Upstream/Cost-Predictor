@@ -321,7 +321,7 @@ def main():
             if feature_idx < num_cols:
                 col_name = X.columns[feature_idx]
                 with columns[col_idx]:
-                    new_data[col_name] = st.number_input(f'{col_name}', value=float(X[col_name].mean()), key=f'input_{col_name}')
+                    new_data[col_name] = st.number_input(f'{col_name}', value=0.0, key=f'input_{col_name}')
 
     if st.button('Predict'):
         df_input = pd.DataFrame([new_data])
