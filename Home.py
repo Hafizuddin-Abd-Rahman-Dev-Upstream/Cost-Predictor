@@ -87,8 +87,33 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Title
-st.title("💲 CE AI Tools")
+# Enhanced Title with custom styling
+st.markdown("""
+<div style="text-align: center; margin: 2rem 0;">
+    <h1 style="
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+        font-size: 3.5rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #00B1A9 0%, #00E5D6 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        text-shadow: 0 4px 8px rgba(0, 177, 169, 0.3);
+        margin-bottom: 0.5rem;
+        letter-spacing: -1px;
+    ">
+        💲 CE AI Tools
+    </h1>
+    <div style="
+        width: 80px;
+        height: 4px;
+        background: linear-gradient(90deg, #00B1A9, #00E5D6);
+        margin: 0 auto;
+        border-radius: 2px;
+        box-shadow: 0 2px 4px rgba(0, 177, 169, 0.4);
+    "></div>
+</div>
+""", unsafe_allow_html=True)
 
 # ✅ FIXED: Using the correct raw GitHub URL for the GIF
 gif_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/cat.gif"
