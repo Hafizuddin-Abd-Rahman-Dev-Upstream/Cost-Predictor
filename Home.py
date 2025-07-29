@@ -157,7 +157,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ✅ FIXED: Using the correct raw GitHub URL for the GIF
-gif_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/money.gif"
+gif_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/USD.gif"
 st.image(gif_url, use_container_width=True)
 
 # Footer
