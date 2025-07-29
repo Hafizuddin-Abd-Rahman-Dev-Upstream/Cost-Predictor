@@ -6,6 +6,17 @@ st.markdown("""
 /* Main page background and card effect */
 section.main > div {background: #FFFFFF; border-radius: 10px; padding: 2rem; box-shadow: 0 2px 8px #00b1a930;}
 h1, h2, h3 {color: #00B1A9;}
+
+/* Header animations */
+@keyframes fadeInSlideRotate {
+    0% { opacity: 0; transform: translateY(-20px) translateX(-100px) rotate(-10deg); }
+    100% { opacity: 1; transform: translateY(0) translateX(0) rotate(0deg); }
+}
+
+.animated-header {
+    animation: fadeInSlideRotate 1.5s ease-out;
+}
+
 /* Button styling */
 .stButton>button {
     background-color: #00B1A9 !important;
@@ -60,9 +71,6 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Optional: Show logo in sidebar if you have 'logo.png'
-# st.sidebar.markdown('<div class="sidebar-logo"><img src="logo.png" width="140"></div>', unsafe_allow_html=True)
-
 # Password protection
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -72,10 +80,10 @@ correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
     with st.form("login_form"):
-        st.markdown("#### 🔐 <span style='color:#00B1A9;'>Access Required</span>", unsafe_allow_html=True)
+        st.markdown("#### 🔐 Access Required", unsafe_allow_html=True)
         password = st.text_input("Enter Access Password", type="password")
         submitted = st.form_submit_button("Login")
-
+        
         if submitted:
             if correct_password is None:
                 st.error("🚫 Password not configured. Please contact admin.")
@@ -87,30 +95,47 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Welcome Page Content
-st.title("💲 CE AI Tools")
+# Animated Header with Navy Blue Color
+st.markdown("""
+<div style="text-align: center; margin: 2rem 0;" class="animated-header">
+    <h1 style="
+        font-family: 'Segoe UI', 'Roboto', sans-serif;
+        font-size: 3.5rem;
+        font-weight: 700;
+        color: #1e3a8a;
+        text-shadow: 0 4px 8px rgba(30, 58, 138, 0.3);
+        margin-bottom: 1rem;
+        letter-spacing: -1px;
+    ">
+        💲 CE AI Tools
+    </h1>
+</div>
+""", unsafe_allow_html=True)
+
+# Display logo from GitHub repository
+logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
+st.image(logo_url, use_container_width=True)
+
+# Catchphrase
+st.markdown("""
+<div style="text-align: center; margin: 1.5rem 0;">
+    <p style="font-size: 1.4rem; font-weight: bold; color: #1e3a8a; margin-bottom: 1rem;">
+        Smart Cost Estimation Made Simple
+    </p>
+    <p style="font-size: 1.1rem; color: #555; line-height: 1.6;">
+        Welcome to the AI-Powered Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
 st.markdown("""
 ---
 #### 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
-
 This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
-
 Please use the sidebar to navigate modules.
-
 ---
-
-#### 🔍 What You Can Do:
-- 📂 Upload or load datasets
-- 📈 Predict project costs using machine learning
-- ⚙️ Apply EPCIC and PRR cost breakdowns
-- 📊 Visualize cost curves
-- 📤 Download prediction results in Excel
-
----
-
 #### 🔐 Access Control
-Some pages may require a password. Please contact your administrator if you do not have one.
-
+Password-protected pages available. Contact administrator for access.
 ---
 """, unsafe_allow_html=True)
 
