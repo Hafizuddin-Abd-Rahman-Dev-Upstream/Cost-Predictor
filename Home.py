@@ -87,32 +87,12 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Welcome Page Content
+# Title
 st.title("💲 CE AI Tools")
-st.markdown("""
----
-#### 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
 
-This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
-
-Please use the sidebar to navigate modules.
-
----
-
-#### 🔍 What You Can Do:
-- 📂 Upload or load datasets
-- 📈 Predict project costs using machine learning
-- ⚙️ Apply EPCIC and PRR cost breakdowns
-- 📊 Visualize cost curves
-- 📤 Download prediction results in Excel
-
----
-
-#### 🔐 Access Control
-Some pages may require a password. Please contact your administrator if you do not have one.
-
----
-""", unsafe_allow_html=True)
+# ✅ Add GIF directly after the title
+gif_url = "https://raw.githubusercontent.com/apizrahman/cost-predictor/main/cat.gif"  # Replace with your actual URL
+st.image(gif_url, use_column_width=True)
 
 # Footer
 st.markdown(
