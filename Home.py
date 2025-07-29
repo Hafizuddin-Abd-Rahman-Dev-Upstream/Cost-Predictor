@@ -135,11 +135,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("""
----
 <p style="font-size: 0.9rem; color: #666; text-align: center;">
     <span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact administrator for access.
 </p>
----
 """, unsafe_allow_html=True)
 
 # Footer
