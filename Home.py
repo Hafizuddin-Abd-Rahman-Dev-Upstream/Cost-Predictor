@@ -114,9 +114,14 @@ st.markdown("""
 
 # Display logo from GitHub repository
 logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
-col1, col2, col3 = st.columns([1,2,1])
-with col3:
-    st.image(logo_url, width=150)
+st.markdown(
+    f"""
+    <div style="display: flex; justify-content: center; align-items: center;">
+        <img src="{logo_url}" width="150">
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 # Catchphrase
 st.markdown("""
