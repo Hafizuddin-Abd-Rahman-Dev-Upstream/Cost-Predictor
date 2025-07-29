@@ -136,7 +136,7 @@ def main():
             st.sidebar.success("All predictions compiled successfully!")
         else:
             st.sidebar.warning("No predictions to download.")
-    if st.sidebar.button("🔄 Refresh GitHub File List"):
+    if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
     st.sidebar.subheader("📁 Choose Data Source")
     data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from GitHub"], index=0)
