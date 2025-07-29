@@ -114,7 +114,7 @@ st.markdown("""
 
 # Display logo from GitHub repository
 logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
-st.image(logo_url, use_container_width=True)
+st.image(logo_url, width=150, height=80)  # set the width and height in pixels
 
 # Catchphrase
 st.markdown("""
