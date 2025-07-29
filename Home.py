@@ -87,22 +87,63 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Enhanced Title with custom styling
+# Enhanced Title with animations
 st.markdown("""
-<div style="text-align: center; margin: 2rem 0;">
+<style>
+@keyframes titleFadeIn {
+    0% { opacity: 0; transform: translateY(-20px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes gradientShift {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+}
+
+@keyframes underlineGrow {
+    0% { width: 0; opacity: 0; }
+    100% { width: 80px; opacity: 1; }
+}
+
+@keyframes pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+}
+
+.animated-title {
+    animation: titleFadeIn 1.2s ease-out;
+}
+
+.gradient-text {
+    background: linear-gradient(135deg, #00B1A9 0%, #00E5D6 50%, #00B1A9 100%);
+    background-size: 200% 200%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: gradientShift 3s ease-in-out infinite;
+}
+
+.animated-underline {
+    animation: underlineGrow 1s ease-out 0.5s both;
+}
+
+.emoji-pulse {
+    display: inline-block;
+    animation: pulse 2s ease-in-out infinite;
+}
+</style>
+
+<div style="text-align: center; margin: 2rem 0;" class="animated-title">
     <h1 style="
         font-family: 'Segoe UI', 'Roboto', sans-serif;
         font-size: 3.5rem;
         font-weight: 700;
-        background: linear-gradient(135deg, #00B1A9 0%, #00E5D6 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
         text-shadow: 0 4px 8px rgba(0, 177, 169, 0.3);
         margin-bottom: 0.5rem;
         letter-spacing: -1px;
-    ">
-        💲 CE AI Tools 💲
+    " class="gradient-text">
+        <span class="emoji-pulse">💲</span> CE AI Tools
     </h1>
     <div style="
         width: 80px;
@@ -111,7 +152,7 @@ st.markdown("""
         margin: 0 auto;
         border-radius: 2px;
         box-shadow: 0 2px 4px rgba(0, 177, 169, 0.4);
-    "></div>
+    " class="animated-underline"></div>
 </div>
 """, unsafe_allow_html=True)
 
