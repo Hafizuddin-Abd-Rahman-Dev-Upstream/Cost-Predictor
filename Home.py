@@ -90,9 +90,9 @@ if not st.session_state.authenticated:
 # Enhanced Title with animations
 st.markdown("""
 <style>
-@keyframes titleFadeIn {
-    0% { opacity: 0; transform: translateY(-20px); }
-    100% { opacity: 1; transform: translateY(0); }
+@keyframes slideRotate {
+    0% { opacity: 0; transform: translateX(-100px) rotate(-10deg); }
+    100% { opacity: 1; transform: translateX(0) rotate(0deg); }
 }
 
 @keyframes gradientShift {
@@ -112,7 +112,7 @@ st.markdown("""
 }
 
 .animated-title {
-    animation: titleFadeIn 1.2s ease-out;
+    animation: slideRotate 1.5s ease-out;
 }
 
 .gradient-text {
