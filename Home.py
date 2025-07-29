@@ -75,7 +75,7 @@ if not st.session_state.authenticated:
         st.markdown("#### 🔐 <span style='color:#00B1A9;'>Access Required</span>", unsafe_allow_html=True)
         password = st.text_input("Enter Access Password", type="password")
         submitted = st.form_submit_button("Login")
-        
+
         if submitted:
             if correct_password is None:
                 st.error("🚫 Password not configured. Please contact admin.")
@@ -87,78 +87,32 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Enhanced Title with animations
+# Welcome Page Content
+st.title("💲 CE AI Tools")
 st.markdown("""
-<style>
-@keyframes slideRotate {
-    0% { opacity: 0; transform: translateX(-100px) rotate(-10deg); }
-    100% { opacity: 1; transform: translateX(0) rotate(0deg); }
-}
+---
+#### 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
 
-@keyframes gradientShift {
-    0% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-    100% { background-position: 0% 50%; }
-}
+This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
 
-@keyframes underlineGrow {
-    0% { width: 0; opacity: 0; }
-    100% { width: 80px; opacity: 1; }
-}
+Please use the sidebar to navigate modules.
 
-@keyframes pulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-}
+---
 
-.animated-title {
-    animation: slideRotate 1.5s ease-out;
-}
+#### 🔍 What You Can Do:
+- 📂 Upload or load datasets
+- 📈 Predict project costs using machine learning
+- ⚙️ Apply EPCIC and PRR cost breakdowns
+- 📊 Visualize cost curves
+- 📤 Download prediction results in Excel
 
-.gradient-text {
-    background: linear-gradient(135deg, #00B1A9 0%, #00E5D6 50%, #00B1A9 100%);
-    background-size: 200% 200%;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    animation: gradientShift 3s ease-in-out infinite;
-}
+---
 
-.animated-underline {
-    animation: underlineGrow 1s ease-out 0.5s both;
-}
+#### 🔐 Access Control
+Some pages may require a password. Please contact your administrator if you do not have one.
 
-.emoji-pulse {
-    display: inline-block;
-    animation: pulse 5s ease-in-out infinite;
-}
-</style>
-
-<div style="text-align: center; margin: 2rem 0;" class="animated-title">
-    <h1 style="
-        font-family: 'Segoe UI', 'Roboto', sans-serif;
-        font-size: 3.5rem;
-        font-weight: 700;
-        text-shadow: 0 4px 8px rgba(0, 177, 169, 0.3);
-        margin-bottom: 0.5rem;
-        letter-spacing: -1px;
-    " class="gradient-text">
-        💲</span> CE AI Tools </span>💲
-    </h1>
-    <div style="
-        width: 100px;
-        height: 4px;
-        background: linear-gradient(90deg, #00B1A9, #00E5D6);
-        margin: 0 auto;
-        border-radius: 2px;
-        box-shadow: 0 2px 4px rgba(0, 177, 169, 0.4);
-    " class="animated-underline"></div>
-</div>
+---
 """, unsafe_allow_html=True)
-
-# ✅ FIXED: Using the correct raw GitHub URL for the GIF
-gif_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/money.gif"
-st.image(gif_url, use_container_width=True)
 
 # Footer
 st.markdown(
