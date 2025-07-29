@@ -314,7 +314,7 @@ def main():
     new_data = {}
     for i, col in enumerate(X.columns):
         col_idx = i % len(cols) if len(cols) > 0 else 0
-        new_data[col] = cols[col_idx].number_input(f'{col}', value=float(X[col].mean()), key=f'input_{col}')
+        new_data[col] = cols[col_idx].number_input(f'{col}', value=0.0, key=f'input_{col}')
 
     if st.button('Predict'):
         df_input = pd.DataFrame([new_data])
