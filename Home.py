@@ -90,9 +90,9 @@ if not st.session_state.authenticated:
 # Title
 st.title("💲 CE AI Tools")
 
-# ✅ Add GIF directly after the title
-gif_url = "https://raw.githubusercontent.com/apizrahman/cost-predictor/main/cat.gif"  # Replace with your actual URL
-st.image(gif_url, use_column_width=True)
+# ✅ Updated GIF section using the correct parameter
+gif_url = "https://github.com/apizrahman24/Cost-Predictor/blob/main/cat.gif"  # Replace with your actual URL
+st.image(gif_url, use_container_width=True)
 
 # Footer
 st.markdown(
