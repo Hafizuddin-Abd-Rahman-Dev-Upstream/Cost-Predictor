@@ -130,11 +130,11 @@ st.markdown("""
 
 st.markdown("""
 ---
-#### 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
+## 👋 <span style="color:#00B1A9;">Hello and Welcome!</span>
 This application helps you perform intelligent **project cost estimations** and breakdowns based on historical data.
 Please use the sidebar to navigate modules.
 ---
-#### 🔐 Access Control
+## 🔐 Access Control
 Password-protected pages available. Contact administrator for access.
 ---
 """, unsafe_allow_html=True)
