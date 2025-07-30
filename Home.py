@@ -96,7 +96,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # 🎯 Top-right logout button
-col1, col2 = st.columns([8, 1])
+col1, col2 = st.columns([7, 2])
 with col2:
     if st.button("🔓 Logout"):
         st.session_state.authenticated = False
