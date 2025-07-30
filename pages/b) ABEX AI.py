@@ -292,10 +292,10 @@ def main():
             st.warning(f"⚠️ Total EPRR input is {eprr_total:.2f}%. Please ensure it sums to 100% if applicable.")
         st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for breakdown by facilities and project types.*")
 
-        st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
+        st.subheader("💼 SST and Owner's Cost Percentage Input")
         st.markdown("")
         col_pd1, col_pd2 = st.columns(2)
-        predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
+        sst_percentage = col_pd1.number_input("Enter SST (%)", min_value=0.0, max_value=100.0, value=0.0)
         owners_percentage = col_pd2.number_input("Enter Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0)
 
         st.subheader("⚠️ Cost Contingency & 📈 Escalation & Inflation Input")
@@ -333,9 +333,9 @@ def main():
             cost = round(pred * (percent / 100), 2)
             result[f"{phase} Cost"] = cost
             eprr_breakdown[phase] = {'cost': cost, 'percentage': percent}
-        predev_cost = round(pred * (predev_percentage / 100), 2)
+        sst_cost = round(pred * (sst_percentage / 100), 2)
         owners_cost = round(pred * (owners_percentage / 100), 2)
-        result["Pre-Development Cost"] = predev_cost
+        result["SST Cost"] = sst_cost
         result["Owner's Cost"] = owners_cost
         contingency_base = pred + owners_cost
         contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
@@ -348,14 +348,14 @@ def main():
         st.session_state['predictions'][selected_dataset_name].append(result)
         display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
         has_breakdown = any(data['percentage'] > 0 for data in eprr_breakdown.values()) or \
-                       predev_percentage > 0 or owners_percentage > 0 or \
+                       sst_percentage > 0 or owners_percentage > 0 or \
                        contingency_percentage > 0 or escalation_percentage > 0
         if has_breakdown:
             for phase, data in eprr_breakdown.items():
                 if data['percentage'] > 0:
                     display_text += f"• {phase} ({data['percentage']:.1f}%): {format_currency(data['cost'], currency)}\n\n"
-            if predev_percentage > 0:
-                display_text += f"**Pre-Development ({predev_percentage:.1f}%):** {format_currency(predev_cost, currency)}\n\n"
+            if sst_percentage > 0:
+                display_text += f"**SST ({sst_percentage:.1f}%):** {format_currency(sst_cost, currency)}\n\n"
             if owners_percentage > 0:
                 display_text += f"**Owner's Cost ({owners_percentage:.1f}%):** {format_currency(owners_cost, currency)}\n\n"
             if contingency_percentage > 0:
@@ -383,9 +383,9 @@ def main():
                     for phase, percent in eprr_percentages.items():
                         cost = round(preds[i] * (percent / 100), 2)
                         entry[f"{phase} Cost"] = cost
-                    predev_cost = round(preds[i] * (predev_percentage / 100), 2)
+                    sst_cost = round(preds[i] * (sst_percentage / 100), 2)
                     owners_cost = round(preds[i] * (owners_percentage / 100), 2)
-                    entry["Pre-Development Cost"] = predev_cost
+                    entry["SST Cost"] = sst_cost
                     entry["Owner's Cost"] = owners_cost
                     contingency_base = preds[i] + owners_cost
                     contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
