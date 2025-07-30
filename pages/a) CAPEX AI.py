@@ -123,6 +123,7 @@ def main():
         st.session_state['predictions'] = {}
     if 'processed_excel_files' not in st.session_state:
         st.session_state['processed_excel_files'] = set()
+        
     st.sidebar.header('Data Controls')
     if st.sidebar.button("Clear all predictions"):
         st.session_state['predictions'] = {}
@@ -136,8 +137,17 @@ def main():
             st.sidebar.success("All predictions compiled successfully!")
         else:
             st.sidebar.warning("No predictions to download.")
+            
+    # Add horizontal line in sidebar
+    st.sidebar.markdown('---')
+    
+    st.sidebar.header('System Controls')
     if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
+
+    # Add horizontal line in sidebar
+    st.sidebar.markdown('---')
+    
     st.sidebar.subheader("📁 Choose Data Source")
     data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
     uploaded_files = []
