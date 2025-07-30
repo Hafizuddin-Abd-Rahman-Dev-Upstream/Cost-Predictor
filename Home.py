@@ -140,7 +140,7 @@ st.markdown('---')
 # Footer
 st.markdown(
     "<div class='footer-div'>"
-    "Developed by Cost Engineering- DFEE for internal project cost estimation uses – <b style='color:#00B1A9;'>RT2025</b>"
+    "Developed by <b style='color:#00B1A9;'>Cost Engineering- DFEE</b> for internal project cost estimation uses – <b style='color:#00B1A9;'>RT2025</b>"
     "</div>",
     unsafe_allow_html=True
 )
