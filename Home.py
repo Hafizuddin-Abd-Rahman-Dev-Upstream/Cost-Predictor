@@ -136,15 +136,11 @@ st.markdown("""
 
 st.markdown("""
 ---
-#<p style="font-size: 0.9rem; color: #666; text-align: center;">
-    #<span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact Cost Engineering focal for access.
-#</p>
-""", unsafe_allow_html=True)
 
 # Footer
 st.markdown(
     "<div class='footer-div'>"
-    "Developed for internal project cost analysis – <b style='color:#00B1A9;'>RT2025</b>"
+    "Developed by Cost Engineering- DFEE for internal project cost estimation uses – <b style='color:#00B1A9;'>RT2025</b>"
     "</div>",
     unsafe_allow_html=True
 )
