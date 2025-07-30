@@ -1,4 +1,13 @@
 import streamlit as st
+from pages import capex_ai, abex_ai  # Ensure you have pages/__init__.py
+
+# Set page config
+st.set_page_config(
+    page_title="CE AI Tools",
+    page_icon="💲",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
 # Inject custom CSS for professional look and dominant color #00B1A9
 st.markdown("""
@@ -63,14 +72,6 @@ h1, h2, h3 {color: #00B1A9;}
 </style>
 """, unsafe_allow_html=True)
 
-# Set page config
-st.set_page_config(
-    page_title="CE AI Tools",
-    page_icon="💲",
-    layout="centered",
-    initial_sidebar_state="collapsed"
-)
-
 # Password protection
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
@@ -95,56 +96,76 @@ if not st.session_state.authenticated:
                 st.error("❌ Incorrect password")
     st.stop()
 
-# Animated Header with Navy Blue Color (no glow)
-st.markdown("""
-<div style="text-align: center; margin: 2rem 0;" class="animated-header">
-    <h1 style="
-        font-family: 'Segoe UI', 'Roboto', sans-serif;
-        font-size: 3.5rem;
-        font-weight: 700;
-        color: #1e3a8a;
-        margin-bottom: 1rem;
-        letter-spacing: -1px;
-    ">
-        💲 CE AI Tools 💲
-    </h1>
-</div>
-""", unsafe_allow_html=True)
+# --- Custom Navigation Logic ---
+if "page" not in st.session_state:
+    st.session_state.page = "Home"
 
-# Display logo from GitHub repository
-logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
-st.markdown(
-    f"""
-    <div style="display: flex; justify-content: center; align-items: center;">
-        <img src="{logo_url}" width="300">
+st.sidebar.title("🔹 Navigation")
+if st.sidebar.button("🏠 Home"):
+    st.session_state.page = "Home"
+if st.sidebar.button("💰 CAPEX AI"):
+    st.session_state.page = "CAPEX"
+if st.sidebar.button("📦 ABEX AI"):
+    st.session_state.page = "ABEX"
+
+# --- Routing to Pages ---
+if st.session_state.page == "Home":
+    # Animated Header with Navy Blue Color (no glow)
+    st.markdown("""
+    <div style="text-align: center; margin: 2rem 0;" class="animated-header">
+        <h1 style="
+            font-family: 'Segoe UI', 'Roboto', sans-serif;
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: #1e3a8a;
+            margin-bottom: 1rem;
+            letter-spacing: -1px;
+        ">
+            💲 CE AI Tools 💲
+        </h1>
     </div>
-    """,
-    unsafe_allow_html=True
-)
-
-# Catchphrase
-st.markdown("""
-<div style="text-align: center; margin: 1.5rem 0;">
-    <p style="font-size: 1.4rem; font-weight: bold; color: #1e3a8a; margin-bottom: 1rem;">
-        "Smart Cost Estimation Made Simple"
+    """, unsafe_allow_html=True)
+    
+    # Display logo from GitHub repository
+    logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
+    st.markdown(
+        f"""
+        <div style="display: flex; justify-content: center; align-items: center;">
+            <img src="{logo_url}" width="300">
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    
+    # Catchphrase
+    st.markdown("""
+    <div style="text-align: center; margin: 1.5rem 0;">
+        <p style="font-size: 1.4rem; font-weight: bold; color: #1e3a8a; margin-bottom: 1rem;">
+            "Smart Cost Estimation Made Simple"
+        </p>
+        <p style="font-size: 1.1rem; color: #555; line-height: 1.6;">
+            Welcome to the AI-Powered Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    st.markdown("""
+    ---
+    <p style="font-size: 0.9rem; color: #666; text-align: center;">
+        <span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact administrator for access.
     </p>
-    <p style="font-size: 1.1rem; color: #555; line-height: 1.6;">
-        Welcome to the AI-Powered Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
-    </p>
-</div>
-""", unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+    
+    # Footer
+    st.markdown(
+        "<div class='footer-div'>"
+        "Developed for internal project cost analysis – <b style='color:#00B1A9;'>RT2025</b>"
+        "</div>",
+        unsafe_allow_html=True
+    )
+    
+elif st.session_state.page == "CAPEX":
+    capex_ai.render()
 
-st.markdown("""
----
-<p style="font-size: 0.9rem; color: #666; text-align: center;">
-    <span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact administrator for access.
-</p>
-""", unsafe_allow_html=True)
-
-# Footer
-st.markdown(
-    "<div class='footer-div'>"
-    "Developed for internal project cost analysis – <b style='color:#00B1A9;'>RT2025</b>"
-    "</div>",
-    unsafe_allow_html=True
-)
+elif st.session_state.page == "ABEX":
+    abex_ai.render()
