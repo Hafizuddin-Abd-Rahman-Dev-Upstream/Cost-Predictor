@@ -86,7 +86,7 @@ if not st.session_state.authenticated:
         
         if submitted:
             if correct_password is None:
-                st.error("🚫 Password not configured. Please contact admin.")
+                st.error("🚫 Password not configured. Please contact Cost Engineering Focal for access.")
             elif password == correct_password:
                 st.session_state.authenticated = True
                 st.success("✅ Access granted")
