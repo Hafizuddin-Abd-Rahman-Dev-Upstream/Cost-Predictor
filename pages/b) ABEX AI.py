@@ -143,6 +143,7 @@ def main():
     # Add horizontal line in sidebar
     st.sidebar.markdown('---')
     
+    st.sidebar.header('System Controls')
     if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
 
