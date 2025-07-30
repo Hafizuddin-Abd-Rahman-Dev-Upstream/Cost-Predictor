@@ -129,16 +129,16 @@ st.markdown("""
         "Smart Cost Estimation Made Simple"
     </p>
     <p style="font-size: 1.1rem; color: #555; line-height: 1.6;">
-        Welcome to the AI-Powered Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
+        AI-Powered Cost Estimation Tool – streamline your project cost estimation with smart, data-driven predictions.
     </p>
 </div>
 """, unsafe_allow_html=True)
 
 st.markdown("""
 ---
-<p style="font-size: 0.9rem; color: #666; text-align: center;">
-    <span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact administrator for access.
-</p>
+#<p style="font-size: 0.9rem; color: #666; text-align: center;">
+    #<span style="color:#00B1A9;">🔐 Access Control:</span> Password-protected pages available. Contact Cost Engineering focal for access.
+#</p>
 """, unsafe_allow_html=True)
 
 # Footer
