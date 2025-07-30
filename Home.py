@@ -95,6 +95,13 @@ if not st.session_state.authenticated:
                 st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
     st.stop()
 
+# 🎯 Top-right logout button
+col1, col2 = st.columns([8, 1])
+with col2:
+    if st.button("🔓 Logout"):
+        st.session_state.authenticated = False
+        st.rerun()
+
 # Animated Header with Navy Blue Color (no glow)
 st.markdown("""
 <div style="text-align: center; margin: 2rem 0;" class="animated-header">
