@@ -181,7 +181,7 @@ def main():
             if uploaded_file.name not in st.session_state['predictions']:
                 st.session_state['predictions'][uploaded_file.name] = []
 
-    if st.sidebar.checkbox("🧹 Cleanup missing datasets from session", value=False,
+    if st.sidebar.checkbox("🧹 Cleanup Current Session", value=False,
                            help="Enable this if you want to remove datasets not uploaded in this session."):
         uploaded_names = {f.name for f in uploaded_files}
         for name in list(st.session_state['datasets'].keys()):
