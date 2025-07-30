@@ -304,8 +304,8 @@ def main():
             st.markdown("")
             contingency_percentage = st.number_input("Enter Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
         with col_cont2:
-            #st.markdown("")
-            #escalation_percentage = st.number_input("Enter Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
+            st.markdown("")
+            escalation_percentage = st.number_input("Enter Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
         st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
 
     st.header('Make New Predictions')
