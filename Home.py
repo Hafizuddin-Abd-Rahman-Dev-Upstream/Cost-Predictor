@@ -75,24 +75,24 @@ st.set_page_config(
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-# Graceful handling if password is not set
+# Load approved emails from file & password from secrets
+APPROVED_EMAILS = st.secrets["emails"]
 correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
     with st.form("login_form"):
         st.markdown("#### 🔐 Access Required", unsafe_allow_html=True)
+        email = st.text_input("Email Address")
         password = st.text_input("Enter Access Password", type="password")
         submitted = st.form_submit_button("Login")
         
         if submitted:
-            if correct_password is None:
-                st.error("🚫 Password not configured. Please contact Cost Engineering Focal for access.")
-            elif password == correct_password:
+            if email in APPROVED_EMAILS and password == correct_password:
                 st.session_state.authenticated = True
-                st.success("✅ Access granted")
+                st.success("✅ Access granted.")
                 st.rerun()
             else:
-                st.error("❌ Incorrect password. Please contact Cost Engineering Focal for access")
+                st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
     st.stop()
 
 # Animated Header with Navy Blue Color (no glow)
