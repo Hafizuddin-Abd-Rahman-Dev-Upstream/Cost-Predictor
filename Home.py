@@ -76,7 +76,7 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 # Load approved emails from file & password from secrets
-APPROVED_EMAILS = st.secrets["emails"]
+APPROVED_EMAILS = st.secrets.get("emails", [])
 correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
