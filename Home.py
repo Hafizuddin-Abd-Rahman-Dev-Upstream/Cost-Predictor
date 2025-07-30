@@ -134,8 +134,8 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("""
----
+# Add horizontal line in sidebar
+st.markdown('---')
 
 # Footer
 st.markdown(
