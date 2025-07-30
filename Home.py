@@ -92,7 +92,7 @@ if not st.session_state.authenticated:
                 st.success("✅ Access granted")
                 st.rerun()
             else:
-                st.error("❌ Incorrect password")
+                st.error("❌ Incorrect password. Please contact Cost Engineering Focal for access")
     st.stop()
 
 # Animated Header with Navy Blue Color (no glow)
