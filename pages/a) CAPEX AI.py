@@ -355,7 +355,7 @@ def main():
                 display_text += f"**Contingency ({contingency_percentage:.1f}%):** {format_currency(contingency_cost, currency)}\n\n"
             if escalation_percentage > 0:
                 display_text += f"**Escalation & Inflation ({escalation_percentage:.3f}%):** {format_currency(escalation_cost, currency)}\n\n"
-        display_text += f"**Grand Total (Predicted Cost + Owner's Cost + Contingency + Esc Infl):** {format_currency(grand_total, currency)}"
+        display_text += f"**Grand Total:** {format_currency(grand_total, currency)}"
         st.success(display_text)
 
     st.write("Or upload an Excel file:")
