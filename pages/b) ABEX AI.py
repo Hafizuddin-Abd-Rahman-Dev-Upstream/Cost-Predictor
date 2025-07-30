@@ -139,6 +139,10 @@ def main():
             st.sidebar.success("All predictions compiled successfully!")
         else:
             st.sidebar.warning("No predictions to download.")
+
+    # Add horizontal line in sidebar
+    st.sidebar.markdown('---')
+    
     if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
 
