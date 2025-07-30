@@ -147,6 +147,9 @@ def main():
     if st.sidebar.button("🔄 Refresh System"):
         list_csvs_from_github.clear()
 
+    # Add horizontal line in sidebar
+    st.sidebar.markdown('---')
+
     st.sidebar.subheader("📁 Choose Data Source")
     data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
     uploaded_files = []
