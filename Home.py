@@ -1,5 +1,15 @@
 import streamlit as st
 
+# Hide Streamlit header icons
+st.markdown("""
+    <style>
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
+    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
+    .stActionButton {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 # Inject custom CSS for professional look and dominant color #00B1A9
 st.markdown("""
 <style>
