@@ -208,7 +208,7 @@ def main():
     target_column = y.name
 
     st.header('Model Training')
-    test_size = st.slider('Select test size (0.0-1.0)', 0.1, 0.5, 0.2)
+    test_size = st.slider('Select test size (0.0-1.0)', 1.0, 0.5, 0.2)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
     scaler = MinMaxScaler()
     X_train_scaled = scaler.fit_transform(X_train)
