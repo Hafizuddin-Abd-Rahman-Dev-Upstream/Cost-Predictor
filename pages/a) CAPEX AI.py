@@ -13,6 +13,16 @@ import io
 import requests
 from matplotlib.ticker import FuncFormatter
 
+# Hide Streamlit header icons
+st.markdown("""
+    <style>
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
+    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
+    .stActionButton {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 st.set_page_config(
     page_title="CAPEX AI RT2025",
     page_icon="💲",
