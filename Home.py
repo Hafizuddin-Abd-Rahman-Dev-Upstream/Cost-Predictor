@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 # Hide Streamlit header icons
 st.markdown("""
@@ -150,6 +151,23 @@ st.markdown("""
     </p>
 </div>
 """, unsafe_allow_html=True)
+
+# 🔘 Navigation Buttons to Pages
+def get_pages_list():
+    PAGES_DIR = "pages"
+    return sorted([
+        os.path.splitext(f)[0]
+        for f in os.listdir(PAGES_DIR)
+        if f.endswith(".py") and not f.startswith("_")
+    ])
+
+st.markdown("### 🧭 Navigate to Pages")
+pages = get_pages_list()
+cols = st.columns(2)
+for i, page in enumerate(pages):
+    with cols[i % 2]:
+        if st.button(f"📂 {page}"):
+            st.switch_page(f"pages/{page}.py")
 
 # Add horizontal line in sidebar
 st.markdown('---')
