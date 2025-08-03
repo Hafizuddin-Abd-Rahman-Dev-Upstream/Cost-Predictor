@@ -1,22 +1,22 @@
 import streamlit as st
 
-# Keep sidebar toggle, hide Share and Favorite only
+# Hide Streamlit header icons but keep mobile sidebar toggle visible
 st.markdown("""
     <style>
-    /* Hide Share and Favorite buttons (top-right) */
-    [data-testid="stShareButton"],
-    [data-testid="stFavoriteButton"],
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
     .stActionButton {
         display: none !important;
     }
 
-    /* Add space so top bar isn't overlapped on mobile */
-    .main > div:first-child {
-        padding-top: 3.5rem;
+    /* Only hide toolbar on desktop (keep it on mobile) */
+    @media (min-width: 768px) {
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
-
 
 # Inject custom CSS for professional look and dominant color #00B1A9
 st.markdown("""
