@@ -1,12 +1,11 @@
 import streamlit as st
-import os
 
 # Hide Streamlit header icons
 st.markdown("""
     <style>
-    [data-testid="stShareButton"],
-    [data-testid="stFavoriteButton"],
-    [data-testid="stToolbar"],
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
+    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
     .stActionButton {display: none !important;}
     </style>
 """, unsafe_allow_html=True)
@@ -14,9 +13,11 @@ st.markdown("""
 # Inject custom CSS for professional look and dominant color #00B1A9
 st.markdown("""
 <style>
+/* Main page background and card effect */
 section.main > div {background: #FFFFFF; border-radius: 10px; padding: 2rem; box-shadow: 0 2px 8px #00b1a930;}
 h1, h2, h3 {color: #00B1A9;}
 
+/* Header animations */
 @keyframes fadeInSlideRotate {
     0% { opacity: 0; transform: translateY(-20px) translateX(-100px) rotate(-10deg); }
     100% { opacity: 1; transform: translateY(0) translateX(0) rotate(0deg); }
@@ -26,6 +27,7 @@ h1, h2, h3 {color: #00B1A9;}
     animation: fadeInSlideRotate 1.5s ease-out;
 }
 
+/* Button styling */
 .stButton>button {
     background-color: #00B1A9 !important;
     color: white !important;
@@ -38,26 +40,31 @@ h1, h2, h3 {color: #00B1A9;}
 .stButton>button:hover {
     filter: brightness(0.90);
 }
+/* Text input styling */
 .stTextInput>div>input {
     border: 1.5px solid #00B1A9 !important;
     border-radius: 8px !important;
     padding: 0.5em;
 }
+/* Form background */
 .stForm {
     background-color: #E4F9F8 !important;
     padding: 1.5rem !important;
     border-radius: 12px !important;
     box-shadow: 0 1px 4px #00b1a930;
 }
+/* Alert styling */
 .stAlert {
     border-radius: 8px !important;
 }
+/* Footer */
 .footer-div {
     text-align: center;
     color: #555;
     font-size: 0.95em;
     margin-top: 2em;
 }
+/* Sidebar logo placeholder (optional) */
 .sidebar-logo {
     display: flex;
     justify-content: center;
@@ -78,6 +85,7 @@ st.set_page_config(
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
+# Load approved emails from file & password from secrets
 APPROVED_EMAILS = st.secrets.get("emails", [])
 correct_password = st.secrets.get("password", None)
 
@@ -104,7 +112,7 @@ with col2:
         st.session_state.authenticated = False
         st.rerun()
 
-# Animated Header
+# Animated Header with Navy Blue Color (no glow)
 st.markdown("""
 <div style="text-align: center; margin: 2rem 0;" class="animated-header">
     <h1 style="
@@ -120,7 +128,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# Display logo
+# Display logo from GitHub repository
 logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
 st.markdown(
     f"""
@@ -143,33 +151,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 🔘 Navigation Buttons to Pages
-def get_pages_list():
-    PAGES_DIR = os.path.join(os.path.dirname(__file__), "pages")
-    if not os.path.isdir(PAGES_DIR):
-        return []
-    return sorted([
-        os.path.splitext(f)[0]
-        for f in os.listdir(PAGES_DIR)
-        if f.endswith(".py") and not f.startswith("_")
-    ])
-
-st.markdown("### 🧭 Navigate to Pages")
-pages = get_pages_list()
-
-# Debug (remove later)
-st.write("Found pages:", pages)
-
-if pages:
-    cols = st.columns(2)
-    for i, page in enumerate(pages):
-        with cols[i % 2]:
-            if st.button(f"📂 {page}"):
-                st.switch_page(f"pages/{page}.py")
-else:
-    st.info("No pages found in the `pages/` folder.")
-
-# Divider
+# Add horizontal line in sidebar
 st.markdown('---')
 
 # Footer
@@ -179,3 +161,4 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True
 )
+
