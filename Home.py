@@ -1,14 +1,23 @@
 import streamlit as st
 
-# Hide Streamlit header icons
+# Hide Streamlit header icons but keep mobile sidebar toggle visible
 st.markdown("""
     <style>
     [data-testid="stShareButton"],  /* Share button */
     [data-testid="stFavoriteButton"], /* Star icon */
-    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
-    .stActionButton {display: none !important;}
+    .stActionButton {
+        display: none !important;
+    }
+
+    /* Only hide toolbar on desktop (keep it on mobile) */
+    @media (min-width: 768px) {
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
+    }
     </style>
 """, unsafe_allow_html=True)
+
 
 # Inject custom CSS for professional look and dominant color #00B1A9
 st.markdown("""
