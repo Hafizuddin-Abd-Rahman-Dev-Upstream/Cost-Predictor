@@ -1,26 +1,19 @@
 import streamlit as st
 
-# Make Share and Favorite icons blend with background, keep sidebar toggle
+# Hide Streamlit header icons but keep mobile sidebar toggle visible
 st.markdown("""
     <style>
-    /* Make Share and Favorite buttons invisible by changing color */
-    [data-testid="stShareButton"] svg,
-    [data-testid="stFavoriteButton"] svg,
-    .stActionButton button {
-        color: #FFFFFF !important;         /* Match background color */
-        fill: #FFFFFF !important;
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
+    .stActionButton {
+        display: none !important;
     }
 
-    /* Optionally remove hover effect */
-    [data-testid="stShareButton"]:hover,
-    [data-testid="stFavoriteButton"]:hover,
-    .stActionButton button:hover {
-        background-color: transparent !important;
-    }
-
-    /* Add top padding so sidebar icon is not covered */
-    .main > div:first-child {
-        padding-top: 3.5rem;
+    /* Only hide toolbar on desktop (keep it on mobile) */
+    @media (min-width: 768px) {
+        [data-testid="stToolbar"] {
+            display: none !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
