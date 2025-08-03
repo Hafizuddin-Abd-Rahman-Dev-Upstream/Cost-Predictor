@@ -1,12 +1,18 @@
 import streamlit as st
 
-# Hide Streamlit header icons
+# Keep sidebar toggle, hide Share and Favorite only
 st.markdown("""
     <style>
+    /* Hide Share and Favorite buttons (top-right) */
     [data-testid="stShareButton"],
     [data-testid="stFavoriteButton"],
     .stActionButton {
         display: none !important;
+    }
+
+    /* Add space so top bar isn't overlapped on mobile */
+    .main > div:first-child {
+        padding-top: 3.5rem;
     }
     </style>
 """, unsafe_allow_html=True)
