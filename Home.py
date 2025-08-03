@@ -10,7 +10,7 @@ st.markdown("""
     }
 
     /* Only hide toolbar on desktop (keep it on mobile) */
-    @media (min-width: 500px) {
+    @media (min-width: 1px) {
         [data-testid="stToolbar"] {
             display: none !important;
         }
