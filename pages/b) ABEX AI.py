@@ -55,7 +55,7 @@ if not st.session_state.authenticated:
     st.stop()
 
 # GitHub Repo Configuration
-GITHUB_USER = "apizrahman24"
+GITHUB_USER = "Hafizuddin-Abd-Rahman-Dev-Upstream"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"
 DATA_FOLDER = "pages/data_ABEX"
