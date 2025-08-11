@@ -56,7 +56,7 @@ if not st.session_state.authenticated:
 GITHUB_USER = "apizrahman24"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"
-DATA_FOLDER = "pages/data_CAPEX"
+DATA_FOLDER = "pages/data_capex"
 
 @st.cache_data
 def list_csvs_from_github():
@@ -457,3 +457,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
