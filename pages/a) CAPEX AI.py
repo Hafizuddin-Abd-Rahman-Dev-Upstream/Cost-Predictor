@@ -58,15 +58,15 @@ REPO_NAME = "Cost-Predictor"
 BRANCH = "main"
 DATA_FOLDER = "pages/data_CAPEX"
 
-@st.cache_data
-def list_csvs_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}"
-    res = requests.get(url)
-    if res.status_code == 200:
-        files = res.json()
-        return [f['name'] for f in files if f['name'].endswith('.csv')]
-    else:
-        st.error("❌ GitHub repo or folder not found.")
+@st.cache_data(ttl=600)
+def list_csvs_from_manifest(folder_path):
+    manifest_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{folder_path}/files.json"
+    try:
+        res = requests.get(manifest_url)
+        res.raise_for_status()
+        return res.json()
+    except Exception as e:
+        st.error(f"Failed to load CSV manifest: {e}")
         return []
 
 def human_format(num, pos=None):
@@ -167,7 +167,7 @@ def main():
     if data_source == "Upload CSV":
         uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
     elif data_source == "Load from Server":
-        github_csvs = list_csvs_from_github()
+        github_csvs = list_csvs_from_manifest(DATA_FOLDER)
         if github_csvs:
             selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
             if selected_file:
@@ -457,6 +457,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
