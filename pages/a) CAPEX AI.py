@@ -60,13 +60,13 @@ DATA_FOLDER = "pages/data_CAPEX"
 
 @st.cache_data
 def list_csvs_from_github():
-    url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}?ref={BRANCH}"
+    url = f"https://api.github.com/repos/{GITHUB_USER}/{REPO_NAME}/contents/{DATA_FOLDER}"
     res = requests.get(url)
     if res.status_code == 200:
         files = res.json()
         return [f['name'] for f in files if f['name'].endswith('.csv')]
     else:
-        st.error(f"❌ GitHub API error {res.status_code}: {res.text}")
+        st.error("❌ GitHub repo or folder not found.")
         return []
 
 def human_format(num, pos=None):
@@ -457,6 +457,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
