@@ -158,7 +158,7 @@ def main():
     
     st.sidebar.header('System Controls')
     if st.sidebar.button("🔄 Refresh System"):
-        list_csvs_from_github.clear()
+        list_csvs_from_manifest.clear()
 
     # Add horizontal line in sidebar
     st.sidebar.markdown('---')
