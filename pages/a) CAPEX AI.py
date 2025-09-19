@@ -169,7 +169,7 @@ def main():
             "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
         )
         # Add this block below the file uploader
-        st.sidebar.markdown("### Or access data from external link")
+        st.sidebar.markdown("### 📁 Or access data from external link")
         data_link = "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"  # <-- CHANGE THIS TO YOUR ACTUAL LINK
         st.sidebar.markdown(
             f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
@@ -200,6 +200,10 @@ def main():
             st.session_state['datasets'][uploaded_file.name] = df
             if uploaded_file.name not in st.session_state['predictions']:
                 st.session_state['predictions'][uploaded_file.name] = []
+
+    # Add horizontal line in sidebar
+    st.sidebar.markdown('---')
+    
     if st.sidebar.checkbox("🧹 Cleanup Current Session", value=False,
                            help="Enable this if you want to remove datasets not uploaded in this session."):
         uploaded_names = {f.name for f in uploaded_files}
@@ -467,6 +471,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
