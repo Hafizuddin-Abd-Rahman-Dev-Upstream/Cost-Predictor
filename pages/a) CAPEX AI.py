@@ -167,7 +167,7 @@ def main():
     if data_source == "Upload CSV (Redirect)":
         if st.sidebar.button("Go to Upload CSV Website"):
             st.markdown("""
-                <meta http-equiv="refresh" content="0; url='https://petronas.sharepoint.com/:f:/r/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/2.Template%20Tools/Cost%20Predictor/Database/CAPEX%20-%20RT%20Q1%202025?csf=1&web=1&e=6MvP0b'" />
+                <meta http-equiv="refresh" content="0; url='https://share.streamlit.io/new'" />
             """, unsafe_allow_html=True)
             st.stop()
     elif data_source == "Load from Server":
@@ -460,6 +460,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
