@@ -162,52 +162,19 @@ def main():
     st.sidebar.markdown('---')
     
     st.sidebar.subheader("📁 Choose Data Source")
-        data_source = st.sidebar.radio(
-        "Data Source",
-        [
-            "Upload CSV manually",
-            "Go to Upload CSV Website",
-            "Load from Server"
-        ],
-        index=0
-    )
-
+    data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
     uploaded_files = []
-
-    if data_source == "Upload CSV manually":
-        uploaded_files = st.sidebar.file_uploader(
-            "Upload CSV files",
-            type="csv",
-            accept_multiple_files=True
-        )
-
-    elif data_source == "Go to Upload CSV Website":
-        st.sidebar.markdown(
-            """
-            <a href="https://your-website.com" target="_blank">
-                <button style="width:100%;font-size:18px;">Go to Upload CSV Website</button>
-            </a>
-            """,
-            unsafe_allow_html=True
-        )
-
+    if data_source == "Upload CSV":
+        uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
     elif data_source == "Load from Server":
         github_csvs = list_csvs_from_manifest(DATA_FOLDER)
         if github_csvs:
-            selected_file = st.sidebar.selectbox(
-                "Choose CSV from GitHub",
-                github_csvs
-            )
+            selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
             if selected_file:
-                raw_url = (
-                    f"https://raw.githubusercontent.com/"
-                    f"{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
-                )
+                raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
                 try:
                     df = pd.read_csv(raw_url)
-                    fake_file = type(
-                        'FakeUpload', (), {'name': selected_file}
-                    )
+                    fake_file = type('FakeUpload', (), {'name': selected_file})
                     uploaded_files.append(fake_file)
                     st.session_state['datasets'][selected_file] = df
                     if selected_file not in st.session_state['predictions']:
@@ -217,7 +184,6 @@ def main():
                     st.error(f"Error loading CSV: {e}")
         else:
             st.warning("No CSV files found in GitHub folder.")
-            
     for uploaded_file in uploaded_files:
         if uploaded_file.name not in st.session_state['datasets']:
             df = pd.read_csv(uploaded_file)
@@ -491,4 +457,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
