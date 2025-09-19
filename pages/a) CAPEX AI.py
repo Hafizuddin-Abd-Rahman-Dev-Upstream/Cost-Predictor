@@ -165,8 +165,8 @@ def main():
     data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
     uploaded_files = []
     if data_source == "Upload CSV":
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
+        uploaded_files = st.sidebar.file_uploader(
+            "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
         )
         # Add this block below the file uploader
         st.sidebar.markdown("### Or access data from external link")
@@ -467,6 +467,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
