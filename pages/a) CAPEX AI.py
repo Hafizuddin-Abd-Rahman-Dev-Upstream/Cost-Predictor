@@ -166,14 +166,14 @@ def main():
     uploaded_files = []
     if data_source == "Upload CSV":
         uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
-    )
-    # Add this block below the file uploader
-    st.sidebar.markdown("### Or access data from external link")
-    data_link = "https://your-data-storage-link.com"  # <-- CHANGE THIS TO YOUR ACTUAL LINK
-    st.sidebar.markdown(
-        f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
-        unsafe_allow_html=True
-    )
+        )
+        # Add this block below the file uploader
+        st.sidebar.markdown("### Or access data from external link")
+        data_link = "https://your-data-storage-link.com"  # <-- CHANGE THIS TO YOUR ACTUAL LINK
+        st.sidebar.markdown(
+            f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
+            unsafe_allow_html=True
+        )
     
     elif data_source == "Load from Server":
         github_csvs = list_csvs_from_manifest(DATA_FOLDER)
@@ -466,5 +466,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
