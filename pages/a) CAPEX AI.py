@@ -162,15 +162,12 @@ def main():
     st.sidebar.markdown('---')
     
     st.sidebar.subheader("📁 Choose Data Source")
-    data_source = st.sidebar.radio("Data Source", ["Upload CSV (Redirect)", "Load from Server"], index=0)
+    data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
     uploaded_files = []
-    if data_source == "Upload CSV (Redirect)":
-        if st.sidebar.button("Go to Upload CSV Website"):
-            st.markdown("""
-                <meta http-equiv="refresh" content="0; url='https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8'" />
-            """, unsafe_allow_html=True)
-            st.stop()
+    if data_source == "Upload CSV":
+        uploaded_files = st.sidebar.file_uploader("Upload CSV files", type="csv", accept_multiple_files=True)
     elif data_source == "Load from Server":
+        github_csvs = list_csvs_from_manifest(DATA_FOLDER)
         if github_csvs:
             selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
             if selected_file:
@@ -460,15 +457,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
