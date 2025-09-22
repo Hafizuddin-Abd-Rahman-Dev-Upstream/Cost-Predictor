@@ -229,9 +229,12 @@ def main():
     currency = get_currency_symbol(df)
     imputer = KNNImputer(n_neighbors=5)
     df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
-    st.header('Data Overview')
-    st.write('Dataset Shape:', df_imputed.shape)
-    st.dataframe(df_imputed.head())
+
+    # Minimize Data Overview
+    with st.expander('Data Overview', expanded=False):    
+        st.header('Data Overview')
+        st.write('Dataset Shape:', df_imputed.shape)
+        st.dataframe(df_imputed.head())
 
     X = df_imputed.iloc[:, :-1]
     y = df_imputed.iloc[:, -1]
