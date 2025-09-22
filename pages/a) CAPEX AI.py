@@ -235,7 +235,6 @@ def main():
     y = df_imputed.iloc[:, -1]
     target_column = y.name
 
-with st.expander('Model Training and Performance', expanded=False):
     st.header('Model Training and Performance')
     test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
@@ -473,6 +472,7 @@ with st.expander('Model Training and Performance', expanded=False):
 
 if __name__ == '__main__':
     main()
+
 
 
 
