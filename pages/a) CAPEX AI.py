@@ -227,9 +227,10 @@ def main():
     imputer = KNNImputer(n_neighbors=5)
     df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
     
-    st.header('Data Overview')
-    st.write('Dataset Shape:', df_imputed.shape)
-    st.dataframe(df_imputed.head())
+    with st.expander('Data Overview', expanded=False):
+        st.header('Data Overview')
+        st.write('Dataset Shape:', df_imputed.shape)
+        st.dataframe(df_imputed.head())
 
     X = df_imputed.iloc[:, :-1]
     y = df_imputed.iloc[:, -1]
@@ -472,6 +473,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
