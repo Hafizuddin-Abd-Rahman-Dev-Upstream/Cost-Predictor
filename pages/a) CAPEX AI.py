@@ -14,14 +14,14 @@ import requests
 from matplotlib.ticker import FuncFormatter
 
 # Hide Streamlit header icons (commented out, not executed)
-# st.markdown("""
-#     <style>
-#     [data-testid="stShareButton"],  /* Share button */
-#     [data-testid="stFavoriteButton"], /* Star icon */
-#     [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
-#     .stActionButton {display: none !important;}
-#     </style>
-# """, unsafe_allow_html=True)
+st.markdown("""
+    <style>
+    [data-testid="stShareButton"],  /* Share button */
+    [data-testid="stFavoriteButton"], /* Star icon */
+    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
+    .stActionButton {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
 
 st.set_page_config(
     page_title="CAPEX AI RT2025",
@@ -471,6 +471,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
