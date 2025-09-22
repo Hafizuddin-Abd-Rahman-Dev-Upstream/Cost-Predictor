@@ -226,6 +226,7 @@ def main():
     currency = get_currency_symbol(df)
     imputer = KNNImputer(n_neighbors=5)
     df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+with st.expander('Data Overview', expanded=False):
     st.header('Data Overview')
     st.write('Dataset Shape:', df_imputed.shape)
     st.dataframe(df_imputed.head())
@@ -234,6 +235,7 @@ def main():
     y = df_imputed.iloc[:, -1]
     target_column = y.name
 
+with st.expander('Model Training and Performance', expanded=False):
     st.header('Model Training and Performance')
     test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
@@ -471,6 +473,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
