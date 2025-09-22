@@ -227,6 +227,7 @@ def main():
     imputer = KNNImputer(n_neighbors=5)
     df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
     
+    # Minimized collapse for Data Overview
     with st.expander('Data Overview', expanded=False):
         st.header('Data Overview')
         st.write('Dataset Shape:', df_imputed.shape)
@@ -236,22 +237,24 @@ def main():
     y = df_imputed.iloc[:, -1]
     target_column = y.name
 
-    st.header('Model Training and Performance')
-    test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-    scaler = MinMaxScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    rf_model = RandomForestRegressor(random_state=42)
-    rf_model.fit(X_train_scaled, y_train)
-    y_pred = rf_model.predict(X_test_scaled)
+    # Minimized collapse for Model Training and Performance
+    with st.expander('Model Training and Performance', expanded=False):
+        st.header('Model Training and Performance')
+        test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+        scaler = MinMaxScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        rf_model = RandomForestRegressor(random_state=42)
+        rf_model.fit(X_train_scaled, y_train)
+        y_pred = rf_model.predict(X_test_scaled)
 
     # st.header('Model Performance')
-    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-    r2 = r2_score(y_test, y_pred)
-    col1, col2 = st.columns(2)
-    col1.metric('RMSE', f'{rmse:,.2f}')
-    col2.metric('R² Score', f'{r2:.2f}')
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        r2 = r2_score(y_test, y_pred)
+        col1, col2 = st.columns(2)
+        col1.metric('RMSE', f'{rmse:,.2f}')
+        col2.metric('R² Score', f'{r2:.2f}')
 
     # Minimized collapse for Data Visualization
     with st.expander('Data Visualization', expanded=False):
@@ -473,6 +476,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
