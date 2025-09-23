@@ -113,12 +113,17 @@ if not st.session_state.authenticated:
                 st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
     st.stop()
 
-# 🎯 Top-right logout button
-col1, col2 = st.columns([7, 2])
+# 🎯 Top-right logout button and clear cache
+col1, col2, col3 = st.columns([7, 2, 2])
 with col2:
     if st.button("🔓 Logout"):
         st.session_state.authenticated = False
         st.rerun()
+with col3:
+    if st.button("🧹 Clear Streamlit Cache"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.success("Cache cleared! Please rerun the app.")
 
 # Animated Header with Navy Blue Color (no glow)
 st.markdown("""
