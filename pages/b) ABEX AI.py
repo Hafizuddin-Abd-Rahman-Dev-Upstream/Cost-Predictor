@@ -30,13 +30,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Inject CSS to hide the sidebar collapse button
-st.markdown("""
-    <style>
-    [data-testid="collapsedControl"] {display: none !important;}
-    </style>
-""", unsafe_allow_html=True)
-
 # Password protection
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
