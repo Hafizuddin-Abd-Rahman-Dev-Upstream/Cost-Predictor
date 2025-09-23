@@ -89,6 +89,15 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Hide sidebar collapse arrow
+st.markdown("""
+<style>
+section[data-testid="stSidebar"] button[aria-label="Collapse sidebar"] {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 # Password protection
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
