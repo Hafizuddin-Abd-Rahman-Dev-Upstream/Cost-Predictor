@@ -14,14 +14,14 @@ from matplotlib.ticker import FuncFormatter
 import requests
 
 # Hide Streamlit header icons
-st.markdown("""
-    <style>
-    [data-testid="stShareButton"],  /* Share button */
-    [data-testid="stFavoriteButton"], /* Star icon */
-    [data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
-    .stActionButton {display: none !important;}
-    </style>
-""", unsafe_allow_html=True)
+#st.markdown("""
+    #<style>
+    #[data-testid="stShareButton"],  /* Share button */
+    #[data-testid="stFavoriteButton"], /* Star icon */
+    #[data-testid="stToolbar"],  /* Toolbar (may include pencil, GitHub, etc.) */
+    #.stActionButton {display: none !important;}
+    #</style>
+#""", unsafe_allow_html=True)
 
 # Set page config
 st.set_page_config(
