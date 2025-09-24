@@ -355,7 +355,7 @@ def main():
             if feature_idx < num_cols:
                 col_name = X.columns[feature_idx]
                 with columns[col_idx]:
-                    missing = st.checkbox(f'Missing ({col_name})', key=f'missing_{col_name}')
+                    missing = st.checkbox(f'{col_name}', key=f'missing_{col_name}')
                     if missing:
                         new_data[col_name] = np.nan
                     else:
