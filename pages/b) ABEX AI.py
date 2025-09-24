@@ -357,7 +357,7 @@ def main():
                 col_name = X.columns[feature_idx]
                 with columns[col_idx]:
                     user_val = st.text_input(
-                        f'{col_name} (type a number or "nan" for missing)', 
+                        f'{col_name}', 
                         value="", 
                         key=f'input_{col_name}'
                     )
