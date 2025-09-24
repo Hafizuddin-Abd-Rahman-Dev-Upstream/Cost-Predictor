@@ -352,7 +352,7 @@ def main():
     new_data = {}
     for i, col in enumerate(X.columns):
         col_idx = i % len(cols) if len(cols) > 0 else 0
-        user_val = cols[col_idx].text_input(f'{col} (type a number or "nan")', key=f'input_{col}')
+        user_val = cols[col_idx].text_input(f'', key=f'input_{col}')
         if user_val.strip().lower() == "nan" or user_val.strip() == "":
             new_data[col] = np.nan
         else:
@@ -479,6 +479,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
