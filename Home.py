@@ -128,11 +128,11 @@ with col2:
     if st.button("🔓 Logout"):
         st.session_state.authenticated = False
         st.rerun()
-with col3:
-    if st.button("🧹 Clear Streamlit Cache"):
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.success("Cache cleared! Please rerun the app.")
+#with col3:
+    #if st.button("🧹 Clear Streamlit Cache"):
+        #st.cache_data.clear()
+        #st.cache_resource.clear()
+        #st.success("Cache cleared! Please rerun the app.")
 
 # Animated Header with Navy Blue Color (no glow)
 st.markdown("""
