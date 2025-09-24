@@ -288,17 +288,13 @@ def main():
         fig, ax = plt.subplots(figsize=(7, 6))
         x_vals = df_imputed[feature].values
         y_vals = y.values
-        mask = (x_vals > 0) & (y_vals > 0)
+        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
         if mask.sum() >= 2:
-            log_x = np.log(x_vals[mask])
-            log_y = np.log(y_vals[mask])
-            slope, intercept, r_val, _, _ = linregress(log_x, log_y)
-            a = np.exp(intercept)
-            b = slope
+            slope, intercept, r_val, _, _ = linregress(x_vals[mask], y_vals[mask])
             sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
             x_line = np.linspace(min(x_vals[mask]), max(x_vals[mask]), 100)
-            y_line = a * (x_line ** b)
-            ax.plot(x_line, y_line, color='red', label=f'Fit: y = {a:.2f} * x^{b:.2f}')
+            y_line = slope * x_line + intercept
+            ax.plot(x_line, y_line, color='red', label=f'Fit: y = {slope:.2f} * x + {intercept:.2f}')
             ax.text(0.05, 0.95, f'$R^2$ = {r_val**2:.3f}', transform=ax.transAxes,
                     verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
         else:
