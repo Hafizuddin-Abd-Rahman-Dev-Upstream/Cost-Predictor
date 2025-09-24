@@ -355,7 +355,12 @@ def main():
             if feature_idx < num_cols:
                 col_name = X.columns[feature_idx]
                 with columns[col_idx]:
-                    new_data[col_name] = st.number_input(f'{col_name}', value=0, key=f'input_{col_name}')
+                    missing = st.checkbox(f'Missing ({col_name})', key=f'missing_{col_name}')
+                    if missing:
+                        new_data[col_name] = np.nan
+                    else:
+                        new_data[col_name] = st.number_input(f'{col_name}', value=0.0, key=f'input_{col_name}')
+
 
     if st.button('Predict'):
         df_input = pd.DataFrame([new_data])
