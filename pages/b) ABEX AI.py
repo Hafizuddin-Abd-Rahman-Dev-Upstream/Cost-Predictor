@@ -348,6 +348,7 @@ def main():
     num_cols = len(X.columns)
     cols_per_row = min(num_cols, 2)
     num_rows = (num_cols + cols_per_row - 1) // cols_per_row
+
     for row in range(num_rows):
         columns = st.columns(cols_per_row)
         for col_idx in range(cols_per_row):
@@ -355,11 +356,18 @@ def main():
             if feature_idx < num_cols:
                 col_name = X.columns[feature_idx]
                 with columns[col_idx]:
-                    missing = st.checkbox(f'{col_name}', key=f'missing_{col_name}')
-                    if missing:
+                    user_val = st.text_input(
+                        f'{col_name} (type a number or "nan" for missing)', 
+                        value="", 
+                        key=f'input_{col_name}'
+                    )
+                    if user_val.strip().lower() == "nan" or user_val.strip() == "":
                         new_data[col_name] = np.nan
                     else:
-                        new_data[col_name] = st.number_input(f'{col_name}', value=0.0, key=f'input_{col_name}')
+                        try:
+                            new_data[col_name] = float(user_val)
+                        except ValueError:
+                            new_data[col_name] = np.nan
 
 
     if st.button('Predict'):
