@@ -324,7 +324,7 @@ def main():
         eprr_total = sum(eprr_percentages.values())
         if abs(eprr_total - 100.0) > 1e-3 and eprr_total > 0:
             st.warning(f"⚠️ Total EPRR input is {eprr_total:.2f}%. Please ensure it sums to 100% if applicable.")
-        st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for breakdown by facilities and project types.*")
+        st.markdown("***")
 
         st.subheader("💼 SST and Owner's Cost Percentage Input")
         st.markdown("")
