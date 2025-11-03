@@ -40,7 +40,7 @@ if not st.session_state.authenticated:
             if (not APPROVED_EMAILS or email in APPROVED_EMAILS) and (correct_password is None or password == correct_password):
                 st.session_state.authenticated = True
                 st.success("✅ Access granted.")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
     st.stop()
@@ -556,13 +556,13 @@ else:
                 to_remove = {fid for fid in st.session_state['processed_excel_files'] if fid.endswith(selected_dataset_name)}
                 for fid in to_remove:
                     st.session_state['processed_excel_files'].remove(fid)
-                st.experimental_rerun()
+                st.rerun()
             for i, p in enumerate(preds):
                 c1, c2 = st.columns([3, 1])
                 c1.write(p.get('Project Name', f"Project {i+1}"))
                 if c2.button('Delete', key=f'del_{selected_dataset_name}_{i}'):
                     preds.pop(i)
-                    st.experimental_rerun()
+                    st.rerun()
         else:
             st.write("No predictions yet.")
 
@@ -797,7 +797,7 @@ with tab2:
                     cc2.write(f"Grand Total: {c['breakdown']['grand_total']:,.2f}")
                     if cc3.button("🗑️", key=f"pb_del_comp_{sel}_{idx}"):
                         comps.pop(idx)
-                        st.experimental_rerun()
+                        st.rerun()
 
                 # Export project
                 buffer = io.BytesIO()
@@ -816,7 +816,7 @@ with tab2:
                         data = json.load(up)
                         st.session_state["projects"][sel] = data
                         st.success("Project imported and replaced.")
-                        st.experimental_rerun()
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Failed to import: {e}")
 
