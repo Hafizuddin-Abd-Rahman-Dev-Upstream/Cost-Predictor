@@ -139,8 +139,12 @@ def train_random_forest_on_df(df: pd.DataFrame, test_size=0.2, random_state=42):
 
     # Target is last column
     target_col = df.columns[-1]
-    X = df.iloc[:, :-1].copy()
-    y = df[target_col].copy()
+    # Keep only numeric columns for modeling (consistent with prior logic)
+    X = df.iloc[:, :-1].select_dtypes(include=[np.number]).copy()
+    y = df[target_col].astype(float).copy()
+
+    if X.shape[1] == 0:
+        raise ValueError("No numeric features found in the dataset. Please ensure your dataset has numeric predictors (all columns except last).")
 
     # Impute numeric columns (KNNImputer)
     imputer = KNNImputer(n_neighbors=5)
@@ -276,10 +280,16 @@ else:
     # We'll keep an imputed+display copy for visuals
     try:
         imputer_preview = KNNImputer(n_neighbors=5)
-        df_imputed_preview = pd.DataFrame(imputer_preview.fit_transform(df.select_dtypes(include=[np.number])), 
-                                          columns=df.select_dtypes(include=[np.number]).columns)
+        numeric_preview_cols = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_preview_cols) > 0:
+            df_imputed_preview = pd.DataFrame(
+                imputer_preview.fit_transform(df[numeric_preview_cols]),
+                columns=numeric_preview_cols
+            )
+        else:
+            df_imputed_preview = pd.DataFrame()
     except Exception:
-        # fallback: use original df for preview if imputation fails
+        # fallback: use original numeric df for preview if imputation fails
         df_imputed_preview = df.select_dtypes(include=[np.number]).copy()
 
     # Target is always the last column
@@ -618,10 +628,11 @@ with tab2:
         )
 
         default_label = st.session_state["component_labels"].get(dataset_for_comp, "")
+        # fixed: avoid walrus; use a plain key string
         component_type = st.text_input(
             "Component type (Oil & Gas term)",
             value=(default_label or "FPSO / Pipeline / Wellhead / Subsea"),
-            key=make_word := f"pb_component_type_{proj_sel or new_project_name or 'NoProject'}"
+            key=f"pb_component_type_{proj_sel or new_project_name or 'NoProject'}"
         )
 
         # If model is not trained for dataset, provide quick training option (RandomForest only)
