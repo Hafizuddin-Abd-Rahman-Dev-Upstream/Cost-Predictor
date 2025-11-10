@@ -492,7 +492,7 @@ if data_source == "Upload CSV":
         "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
     )
     st.sidebar.markdown("### 📁 Or access data from external link")
-    data_link = "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx"
+    data_link = "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase%2FCAPEX%20%2D%20RT%20Q1%202025&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"
     st.sidebar.markdown(
         f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
         unsafe_allow_html=True
@@ -1322,4 +1322,5 @@ st.markdown("""
     <p><strong>CAPEX AI RT2025</strong> | Powered by Automatic ML Model Selection</p>
     <p>📊 6 Models Evaluated | 🎯 Best Model Auto-Selected | 📥 Comprehensive Reports</p>
 </div>
+
 """, unsafe_allow_html=True)
