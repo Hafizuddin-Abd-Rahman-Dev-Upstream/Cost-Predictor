@@ -230,7 +230,7 @@ button[aria-label="Toggle sidebar"]:hover {{
 # ---------------------------------------------------------------------------------------
 st.markdown("""
 <div class="petronas-hero">
-  <h1>ABEX AI RT2025</h1>
+  <h1>OPEX AI RT2025</h1>
   <p>Data-driven cost prediction •TEST•</p>
 </div>
 """, unsafe_allow_html=True)
