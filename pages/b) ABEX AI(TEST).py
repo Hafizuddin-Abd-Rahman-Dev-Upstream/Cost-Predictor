@@ -70,7 +70,7 @@ SHAREPOINT_LINKS = {
     "Shallow Water": "https://petronas.sharepoint.com/sites/your-site/shallow-water",
     "Deep Water": "https://petronas.sharepoint.com/sites/your-site/deep-water",
     "Onshore": "https://petronas.sharepoint.com/sites/your-site/onshore",
-    "Unconventional": "https://petronas.sharepoint.com/sites/your-site/unconventional",
+    "Uncon": "https://petronas.sharepoint.com/sites/your-site/uncon",
     "CCS": "https://petronas.sharepoint.com/sites/your-site/ccs",
     # you can edit these to the final SharePoint URLs later
 }
@@ -911,7 +911,7 @@ def single_prediction(X, y, payload: dict, dataset_name: str = "default"):
 # ---------------------------------------------------------------------------------------
 # NAV ROW — FIVE SHAREPOINT BUTTONS
 # ---------------------------------------------------------------------------------------
-nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCONVENTIONAL", "CCS"]
+nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCON", "CCS"]
 nav_cols = st.columns(len(nav_labels))
 
 for col, label in zip(nav_cols, nav_labels):
