@@ -929,7 +929,7 @@ with st.container():
         with st.popover("📘 Basis & Assumption Reference", use_container_width=True):
             st.image(
                 "https://raw.githubusercontent.com/"
-                "Hafizuddin-Abd-Rahman-Dev-Upstream/Cost-Predictor/pages/BasisAssum.png",
+                "Hafizuddin-Abd-Rahman-Dev-Upstream/Cost-Predictor/main/pages/BasisAssum.png",
                 use_container_width=True,
             )
             st.markdown(
