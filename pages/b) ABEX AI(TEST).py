@@ -166,7 +166,33 @@ html, body {{
   transform: translateY(-1px);
   box-shadow: 0 6px 16px rgba(0,0,0,0.18);
 }}
-
+/* ================= FLOATING INFO BUTTON ================= */
+.floating-info-btn {{
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 55px;
+    height: 55px;
+    background: linear-gradient(135deg, #00A19B, #6C4DD3);
+    border-radius: 50%;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 9999999;
+    transition: transform .2s ease, box-shadow .2s ease;
+}}
+.floating-info-btn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.35);
+}}
+.floating-info-btn-icon {{
+    color: white;
+    font-size: 26px;
+    font-weight: 800;
+    margin-top: -2px;
+}}
 /* ---------------- Tabs ---------------- */
 .stTabs [role="tablist"] {{
   display: flex;
@@ -913,6 +939,43 @@ def single_prediction(X, y, payload: dict, dataset_name: str = "default"):
 # ---------------------------------------------------------------------------------------
 nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCON", "CCS"]
 nav_cols = st.columns(len(nav_labels))
+# ============================================================
+# FLOATING INFO BUTTON — BASIS & ASSUMPTIONS
+# ============================================================
+
+# GitHub image path (replace if your file name changes)
+BASIS_IMG = (
+    "https://raw.githubusercontent.com/"
+    "Hafizuddin-Abd-Rahman-Dev-Upstream/Cost-Predictor/pages/BasisAssum.png"
+)
+
+# Initialize popover state
+if "show_basis_pop" not in st.session_state:
+    st.session_state.show_basis_pop = False
+
+# Render floating button (HTML)
+st.markdown(
+    """
+    <div class="floating-info-btn"
+         onclick="fetch('?show_basis=true').then(() => window.location.reload());">
+        <span class="floating-info-btn-icon">ⓘ</span>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Check if user clicked it
+if "show_basis" in st.query_params:
+    st.session_state.show_basis_pop = True
+    st.query_params.clear()
+
+# Popover content
+if st.session_state.show_basis_pop:
+    with st.popover("📘 Basis & Assumptions", use_container_width=True):
+        st.image(BASIS_IMG, use_container_width=True)
+        if st.button("Close"):
+            st.session_state.show_basis_pop = False
+            st.rerun()
 
 for col, label in zip(nav_cols, nav_labels):
     with col:
