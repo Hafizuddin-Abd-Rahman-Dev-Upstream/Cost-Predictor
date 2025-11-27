@@ -991,7 +991,7 @@ if "show_basis_popover" not in st.session_state:
 
 # Popover content (only appears after click)
 if st.session_state.show_basis_popover:
-    with st.popover("Basis & Assumption"):
+    with st.popover("Basis & Assumptions"):
         st.image(BASIS_IMG_PATH, use_container_width=True, caption="Basis & Assumptions")
                # Close button to hide popover
         if st.button("Close"):
