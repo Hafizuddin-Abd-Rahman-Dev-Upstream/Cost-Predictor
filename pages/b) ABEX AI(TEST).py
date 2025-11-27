@@ -974,32 +974,6 @@ with tab_data:
             unsafe_allow_html=True,
         )
 
-
-# ========================== BASIS & ASSUMPTIONS (Popover) ==========================
-# This block should be placed inside `with tab_data:` after the dataset preview.
-
-# 1) Make sure your Streamlit version supports st.popover (Streamlit >= 1.30).
-#    If not, fall back to the "modal-style" block from Option B.
-
-# 2) Point to a local file (e.g., "./assets/basis_assumptions.png")
-#    or a direct image URL (SharePoint, GitHub raw, etc.)
-BASIS_IMG_PATH = "C:\\Users\\ahmadnaquibsyahmee.m\\Downloads\\Cost-Predictor-main 3\\Cost-Predictor-main\\pages\\assets\\BasisAssum.png"
-# Maintain state
-if "show_basis_popover" not in st.session_state:
-    st.session_state.show_basis_popover = False
-
-
-# Popover content (only appears after click)
-if st.session_state.show_basis_popover:
-    with st.popover("Basis & Assumption"):
-        st.image(BASIS_IMG_PATH, use_container_width=True, caption="Basis & Assumptions")
-               # Close button to hide popover
-        if st.button("Close"):
-            st.session_state.show_basis_popover = False
-  
-
-    
-
     uploaded_files = []
     if data_source == "Upload CSV":
         uploaded_files = st.file_uploader(
@@ -1068,7 +1042,7 @@ if st.session_state.show_basis_popover:
         with colC:
             st.metric("Currency", f"{currency or '—'}")
         with st.expander("Preview (first 10 rows)", expanded=False):
-            st.dataframe(df.head(10), use_container_width=True)	
+            st.dataframe(df.head(10), use_container_width=True)
     else:
         st.info("Upload or load a dataset to proceed.")
 
