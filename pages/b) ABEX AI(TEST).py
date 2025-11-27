@@ -70,7 +70,7 @@ SHAREPOINT_LINKS = {
     "Shallow Water": "https://petronas.sharepoint.com/sites/your-site/shallow-water",
     "Deep Water": "https://petronas.sharepoint.com/sites/your-site/deep-water",
     "Onshore": "https://petronas.sharepoint.com/sites/your-site/onshore",
-    "Uncon": "https://petronas.sharepoint.com/sites/your-site/uncon",
+    "Unconventional": "https://petronas.sharepoint.com/sites/your-site/unconventional",
     "CCS": "https://petronas.sharepoint.com/sites/your-site/ccs",
     # you can edit these to the final SharePoint URLs later
 }
@@ -223,7 +223,7 @@ st.markdown(
     """
 <div class="petronas-hero">
   <h1>ABEX AI RT2025</h1>
-  <p>Data-driven ABEX prediction</p>
+  <p>Data-driven ABEX prediction & portfolio assembly</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -911,33 +911,7 @@ def single_prediction(X, y, payload: dict, dataset_name: str = "default"):
 # ---------------------------------------------------------------------------------------
 # NAV ROW — FIVE SHAREPOINT BUTTONS
 # ---------------------------------------------------------------------------------------
-nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCON", "CCS"]
-# ---------------------------------------------------------------------------------------
-# INFO BUTTON — BASIS & ASSUMPTIONS (POPOVER IMAGE)
-# ---------------------------------------------------------------------------------------
-
-with st.container():
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    info_col = st.columns([0.15, 0.85])[0]
-
-    with info_col:
-        if st.button("ℹ️ Basis & Assumptions", key="info_basis"):
-            st.session_state.show_basis_pop = True
-
-    if st.session_state.get("show_basis_pop", False):
-        with st.popover("📘 Basis & Assumption Reference", use_container_width=True):
-            st.image(
-                "https://raw.githubusercontent.com/"
-                "Hafizuddin-Abd-Rahman-Dev-Upstream/Cost-Predictor/tree/main/pages/BasisAssum.png",
-                use_container_width=True,
-            )
-            st.markdown(
-                '<div style="text-align:center;margin-top:10px;">'
-                '<button onclick="window.location.reload()">Close</button>'
-                "</div>",
-                unsafe_allow_html=True,
-            )
+nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCONVENTIONAL", "CCS"]
 nav_cols = st.columns(len(nav_labels))
 
 for col, label in zip(nav_cols, nav_labels):
