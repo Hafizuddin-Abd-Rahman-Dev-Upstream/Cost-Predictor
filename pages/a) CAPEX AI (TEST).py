@@ -1,7 +1,3 @@
-# ======================= CAPEX AI — PETRONAS Gradient UI (Full App, with Project Builder + Exports) =======================
-# - Data • Model • Visualization • Predict • Results • Project Builder • Compare Projects
-# - Excel/PPT export with charts, heatmaps, and lines for projects & comparisons
-
 import io
 import json
 import zipfile
@@ -106,10 +102,7 @@ html, body {{
 }}
 [data-testid="stSidebar"] * {{ color: #fff !important; }}
 
-/* ========================= OPTIONAL: LIGHT TWEAK TO SIDEBAR TOGGLE ========================= */
-/* We let Streamlit keep its Material Icon (no more keyboard_double_arrow_right text)
-   but nudge position for a floating feel. Adjust as you like. */
-
+/* ---------------- Sidebar Toggle ---------------- */
 [data-testid="collapsedControl"] {{
   position: fixed !important;
   top: 50% !important;
@@ -482,7 +475,7 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
     p = title.text_frame.paragraphs[0]
     p.alignment = PP_ALIGN.LEFT
     p.font.size = Pt(32)
-    p.font.bold = True    # noqa: F841
+    p.font.bold = True
     p.font.color.rgb = RGBColor(0, 161, 155)
 
     # Summary slide
@@ -906,9 +899,6 @@ def single_prediction(X, y, payload: dict, dataset_name: str = "default"):
 
 
 # ---------------------------------------------------------------------------------------
-# NAV ROW
-# ---------------------------------------------------------------------------------------
-# ---------------------------------------------------------------------------------------
 # NAV ROW — FIVE SHAREPOINT BUTTONS
 # ---------------------------------------------------------------------------------------
 nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCON", "CCS"]
@@ -929,133 +919,221 @@ for col, label in zip(nav_cols, nav_labels):
         )
 
 # ---------------------------------------------------------------------------------------
-# TABS
+# TOP-LEVEL TABS: Data, Project Builder, Compare Projects
 # ---------------------------------------------------------------------------------------
-(
-    tab_data,
-    tab_model,
-    tab_viz,
-    tab_predict,
-    tab_results,
-    tab_pb,
-    tab_compare,
-) = st.tabs(
-    [
-        "📁 Data",
-        "⚙️ Model",
-        "📈 Visualization",
-        "🎯 Predict",
-        "📄 Results",
-        "🏗️ Project Builder",
-        "🔀 Compare Projects",
-    ]
+tab_main_data, tab_pb, tab_compare = st.tabs(
+    ["📊 Data", "🏗️ Project Builder", "🔀 Compare Projects"]
 )
 
-# ===================================== DATA TAB ========================================
-with tab_data:
-    st.markdown(
-        '<h4 style="margin:0;color:#000;">Data Sources</h4><p></p>',
-        unsafe_allow_html=True,
+# ============================ DATA TAB WITH SUB-TABS ====================================
+with tab_main_data:
+    (
+        sub_data,
+        sub_model,
+        sub_viz,
+        sub_predict,
+        sub_results,
+    ) = st.tabs(
+        [
+            "📁 Data",
+            "⚙️ Model",
+            "📈 Visualization",
+            "🎯 Predict",
+            "📄 Results",
+        ]
     )
-    c1, c2 = st.columns([1.2, 1])
-    with c1:
-        data_source = st.radio(
-            "Choose data source", ["Upload CSV", "Load from Server"], horizontal=True
-        )
-    with c2:
-        st.caption("Enterprise Storage (SharePoint)")
-        data_link = ("https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase%2FCAPEX%20%2D%20RT%20Q1%202025&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"       
-        )
+
+    # ===================================== DATA SUB-TAB =================================
+    with sub_data:
         st.markdown(
-            f'<a href="{data_link}" target="_blank" rel="noopener" class="petronas-button">Open Enterprise Storage</a>',
+            '<h4 style="margin:0;color:#000;">Data Sources</h4><p></p>',
             unsafe_allow_html=True,
         )
+        c1, c2 = st.columns([1.2, 1])
+        with c1:
+            data_source = st.radio(
+                "Choose data source", ["Upload CSV", "Load from Server"], horizontal=True
+            )
+        with c2:
+            st.caption("Enterprise Storage (SharePoint)")
+            data_link = (
+                "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/"
+                "DFE%20Cost%20Engineering/Forms/AllItems.aspx?"
+                "id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering"
+                "%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase%2FCAPEX%20%2D%20RT%20Q1%202025"
+                "&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"
+            )
+            st.markdown(
+                f'<a href="{data_link}" target="_blank" rel="noopener" class="petronas-button">Open Enterprise Storage</a>',
+                unsafe_allow_html=True,
+            )
 
-    uploaded_files = []
-    if data_source == "Upload CSV":
-        uploaded_files = st.file_uploader(
-            "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
-        )
-    else:
-        github_csvs = list_csvs_from_manifest(DATA_FOLDER)
-        if github_csvs:
-            selected_file = st.selectbox("Choose CSV from GitHub", github_csvs)
-            if st.button("Load selected CSV"):
-                raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
-                try:
-                    df = pd.read_csv(raw_url)
-                    fake = type("FakeUpload", (), {"name": selected_file})
-                    uploaded_files = [fake]
-                    st.session_state.datasets[selected_file] = df
-                    st.session_state.predictions.setdefault(selected_file, [])
-                    toast(f"Loaded from GitHub: {selected_file}")
-                except Exception as e:
-                    st.error(f"Error loading CSV: {e}")
+        uploaded_files = []
+        if data_source == "Upload CSV":
+            uploaded_files = st.file_uploader(
+                "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
+            )
         else:
-            st.info("No CSV files found in GitHub folder.")
+            github_csvs = list_csvs_from_manifest(DATA_FOLDER)
+            if github_csvs:
+                selected_file = st.selectbox("Choose CSV from GitHub", github_csvs)
+                if st.button("Load selected CSV"):
+                    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
+                    try:
+                        df = pd.read_csv(raw_url)
+                        fake = type("FakeUpload", (), {"name": selected_file})
+                        uploaded_files = [fake]
+                        st.session_state.datasets[selected_file] = df
+                        st.session_state.predictions.setdefault(selected_file, [])
+                        toast(f"Loaded from GitHub: {selected_file}")
+                    except Exception as e:
+                        st.error(f"Error loading CSV: {e}")
+            else:
+                st.info("No CSV files found in GitHub folder.")
 
-    if uploaded_files:
-        for up in uploaded_files:
-            if up.name not in st.session_state.datasets:
-                if hasattr(up, "read"):
-                    df = pd.read_csv(up)
-                else:
-                    df = st.session_state.datasets.get(up.name, None)
-                if df is not None:
-                    st.session_state.datasets[up.name] = df
-                    st.session_state.predictions.setdefault(up.name, [])
-        toast("Dataset(s) added.")
+        if uploaded_files:
+            for up in uploaded_files:
+                if up.name not in st.session_state.datasets:
+                    if hasattr(up, "read"):
+                        df = pd.read_csv(up)
+                    else:
+                        df = st.session_state.datasets.get(up.name, None)
+                    if df is not None:
+                        st.session_state.datasets[up.name] = df
+                        st.session_state.predictions.setdefault(up.name, [])
+            toast("Dataset(s) added.")
 
-    st.divider()
-    cA, cB, cC = st.columns([1, 1, 2])
-    with cA:
-        if st.button("🧹 Clear all predictions"):
-            st.session_state.predictions = {
-                k: [] for k in st.session_state.predictions.keys()
-            }
-            toast("All predictions cleared.", "🧹")
-    with cB:
-        if st.button("🧺 Clear processed files history"):
-            st.session_state.processed_excel_files = set()
-            toast("Processed files history cleared.", "🧺")
-    with cC:
-        if st.button("🔁 Refresh server manifest"):
-            list_csvs_from_manifest.clear()
-            toast("Server manifest refreshed.", "🔁")
+        st.divider()
+        cA, cB, cC = st.columns([1, 1, 2])
+        with cA:
+            if st.button("🧹 Clear all predictions"):
+                st.session_state.predictions = {
+                    k: [] for k in st.session_state.predictions.keys()
+                }
+                toast("All predictions cleared.", "🧹")
+        with cB:
+            if st.button("🧺 Clear processed files history"):
+                st.session_state.processed_excel_files = set()
+                toast("Processed files history cleared.", "🧺")
+        with cC:
+            if st.button("🔁 Refresh server manifest"):
+                list_csvs_from_manifest.clear()
+                toast("Server manifest refreshed.", "🔁")
 
-    st.divider()
+        st.divider()
 
-    if st.session_state.datasets:
-        ds_name = st.selectbox(
-            "Active dataset", list(st.session_state.datasets.keys())
-        )
-        df = st.session_state.datasets[ds_name]
-        currency = get_currency_symbol(df)
-        colA, colB, colC = st.columns([1, 1, 1])
-        with colA:
-            st.metric("Rows", f"{df.shape[0]:,}")
-        with colB:
-            st.metric("Columns", f"{df.shape[1]:,}")
-        with colC:
-            st.metric("Currency", f"{currency or '—'}")
-        with st.expander("Preview (first 10 rows)", expanded=False):
-            st.dataframe(df.head(10), use_container_width=True)
-    else:
-        st.info("Upload or load a dataset to proceed.")
+        if st.session_state.datasets:
+            ds_name = st.selectbox(
+                "Active dataset", list(st.session_state.datasets.keys())
+            )
+            df = st.session_state.datasets[ds_name]
+            currency = get_currency_symbol(df)
+            colA, colB, colC = st.columns([1, 1, 1])
+            with colA:
+                st.metric("Rows", f"{df.shape[0]:,}")
+            with colB:
+                st.metric("Columns", f"{df.shape[1]:,}")
+            with colC:
+                st.metric("Currency", f"{currency or '—'}")
+            with st.expander("Preview (first 10 rows)", expanded=False):
+                st.dataframe(df.head(10), use_container_width=True)
+        else:
+            st.info("Upload or load a dataset to proceed.")
 
-# ===================================== MODEL TAB =======================================
-with tab_model:
-    if not st.session_state.datasets:
-        st.info("No dataset. Go to **Data** tab to upload or load.")
-    else:
-        ds_name = st.selectbox(
-            "Dataset for model training",
-            list(st.session_state.datasets.keys()),
-            key="ds_model",
-        )
-        df = st.session_state.datasets[ds_name]
+    # ===================================== MODEL SUB-TAB =================================
+    with sub_model:
+        if not st.session_state.datasets:
+            st.info("No dataset. Go to **Data** sub-tab to upload or load.")
+        else:
+            ds_name = st.selectbox(
+                "Dataset for model training",
+                list(st.session_state.datasets.keys()),
+                key="ds_model",
+            )
+            df = st.session_state.datasets[ds_name]
 
-        with st.spinner("Imputing & preparing..."):
+            with st.spinner("Imputing & preparing..."):
+                imputed = pd.DataFrame(
+                    KNNImputer(n_neighbors=5).fit_transform(df), columns=df.columns
+                )
+                X = imputed.iloc[:, :-1]
+                y = imputed.iloc[:, -1]
+                target_column = y.name
+
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>',
+                unsafe_allow_html=True,
+            )
+            c1, c2 = st.columns([1, 3])
+            with c1:
+                test_size = st.slider(
+                    "Test size",
+                    0.1,
+                    0.5,
+                    0.2,
+                    0.05,
+                    help="Fraction of data used for testing",
+                )
+                run = st.button("Run training")
+            with c2:
+                st.caption(
+                    "Automatic best-model selection over 6 regressors (with scaling & imputation)."
+                )
+
+            if run:
+                with st.spinner("Training model..."):
+                    metrics = evaluate_model(X, y, test_size=test_size)
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.metric("RMSE (best)", f"{metrics['rmse']:,.2f}")
+                with c2:
+                    st.metric("R² (best)", f"{metrics['r2']:.3f}")
+
+                st.session_state._last_metrics = metrics
+                st.session_state.best_model_name_per_dataset[ds_name] = metrics.get(
+                    "best_model"
+                )
+
+                toast("Training complete.")
+                st.caption(
+                    f"Best model selected: **{metrics.get('best_model', 'RandomForest')}**"
+                )
+
+                # MODEL COMPARISON TABLE (6 MODELS) WITH COLOUR
+                try:
+                    models_list = metrics.get("models", [])
+                    if models_list:
+                        df_models = pd.DataFrame(models_list)
+                        df_models["rmse"] = df_models["rmse"].astype(float)
+                        df_models["r2"] = df_models["r2"].astype(float)
+                        df_models = df_models.set_index("model")
+                        st.markdown("##### Model comparison (6-model pool)")
+                        styled = (
+                            df_models.style.format(
+                                {"rmse": "{:,.2f}", "r2": "{:.3f}"}
+                            )
+                            .background_gradient(
+                                subset=["r2"], cmap="YlGn"
+                            )  # greener = better R²
+                            .background_gradient(
+                                subset=["rmse"], cmap="OrRd_r"
+                            )  # darker red = lower RMSE
+                        )
+                        st.dataframe(styled, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"Could not render model comparison table: {e}")
+
+    # ================================ VISUALIZATION SUB-TAB ==============================
+    with sub_viz:
+        if not st.session_state.datasets:
+            st.info("No dataset. Go to **Data** sub-tab to upload or load.")
+        else:
+            ds_name = st.selectbox(
+                "Dataset for visualization",
+                list(st.session_state.datasets.keys()),
+                key="ds_viz",
+            )
+            df = st.session_state.datasets[ds_name]
             imputed = pd.DataFrame(
                 KNNImputer(n_neighbors=5).fit_transform(df), columns=df.columns
             )
@@ -1063,429 +1141,348 @@ with tab_model:
             y = imputed.iloc[:, -1]
             target_column = y.name
 
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>',
-            unsafe_allow_html=True,
-        )
-        c1, c2 = st.columns([1, 3])
-        with c1:
-            test_size = st.slider(
-                "Test size",
-                0.1,
-                0.5,
-                0.2,
-                0.05,
-                help="Fraction of data used for testing",
+            # Correlation Matrix
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>',
+                unsafe_allow_html=True,
             )
-            run = st.button("Run training")
-        with c2:
-            st.caption(
-                "Automatic best-model selection over 6 regressors (with scaling & imputation)."
+            corr = imputed.corr(numeric_only=True)
+            fig = px.imshow(
+                corr,
+                text_auto=".2f",
+                aspect="auto",
+                color_continuous_scale="RdBu_r",
+                zmin=-1,
+                zmax=1,
             )
+            fig.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor=PETRONAS["white"],
+                plot_bgcolor=PETRONAS["white"],
+                font=dict(color=PETRONAS["black"]),
+                xaxis=dict(color=PETRONAS["black"]),
+                yaxis=dict(color=PETRONAS["black"]),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
 
-        if run:
-            with st.spinner("Training model..."):
-                metrics = evaluate_model(X, y, test_size=test_size)
-            c1, c2 = st.columns(2)
+            # Feature Importance (RandomForest for explainability only)
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Feature Importance</h4><p>Model</p>',
+                unsafe_allow_html=True,
+            )
+            scaler = MinMaxScaler().fit(X)
+            model = RandomForestRegressor(random_state=42).fit(
+                scaler.transform(X), y
+            )
+            importances = model.feature_importances_
+            fi = (
+                pd.DataFrame(
+                    {"feature": X.columns, "importance": importances}
+                ).sort_values("importance", ascending=True)
+            )
+            fig2 = go.Figure(
+                go.Bar(
+                    x=fi["importance"],
+                    y=fi["feature"],
+                    orientation="h",
+                    marker_color=PETRONAS["teal"],
+                )
+            )
+            fig2.update_layout(
+                xaxis_title="Importance",
+                yaxis_title="Feature",
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor=PETRONAS["white"],
+                plot_bgcolor=PETRONAS["white"],
+                font=dict(color=PETRONAS["black"]),
+                xaxis=dict(color=PETRONAS["black"]),
+                yaxis=dict(color=PETRONAS["black"]),
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+            # Cost Curve
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>',
+                unsafe_allow_html=True,
+            )
+            feat = st.selectbox("Select feature for cost curve", X.columns)
+            x_vals = imputed[feat].values
+            y_vals = y.values
+            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+
+            scatter_df = pd.DataFrame(
+                {feat: x_vals[mask], target_column: y_vals[mask]}
+            )
+            fig3 = px.scatter(scatter_df, x=feat, y=target_column, opacity=0.65)
+            fig3.update_traces(marker=dict(color=PETRONAS["teal"]))
+
+            if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
+                xv = scatter_df[feat].to_numpy(dtype=float)
+                yv = scatter_df[target_column].to_numpy(dtype=float)
+                slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
+                x_line = np.linspace(xv.min(), xv.max(), 100)
+                y_line = slope * x_line + intercept
+                fig3.add_trace(
+                    go.Scatter(
+                        x=x_line,
+                        y=y_line,
+                        mode="lines",
+                        name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
+                        line=dict(color=PETRONAS["purple"]),
+                    )
+                )
+            else:
+                st.warning("Not enough valid/variable data to compute regression.")
+
+            fig3.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor=PETRONAS["white"],
+                plot_bgcolor=PETRONAS["white"],
+                font=dict(color=PETRONAS["black"]),
+                xaxis=dict(color=PETRONAS["black"]),
+                yaxis=dict(color=PETRONAS["black"]),
+            )
+            st.plotly_chart(fig3, use_container_width=True)
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+
+    # ===================================== PREDICT SUB-TAB ===============================
+    with sub_predict:
+        if not st.session_state.datasets:
+            st.info("No dataset. Go to **Data** sub-tab to upload or load.")
+        else:
+            ds_name = st.selectbox(
+                "Dataset for prediction",
+                list(st.session_state.datasets.keys()),
+                key="ds_pred",
+            )
+            df = st.session_state.datasets[ds_name]
+            currency = get_currency_symbol(df)
+
+            imputed = pd.DataFrame(
+                KNNImputer(n_neighbors=5).fit_transform(df), columns=df.columns
+            )
+            X, y = imputed.iloc[:, :-1], imputed.iloc[:, -1]
+            target_column = y.name
+
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Configuration (EPRR • Taxes • Owner • Risk)</h4><p>Step 3</p>',
+                unsafe_allow_html=True,
+            )
+            c1, c2 = st.columns([1, 1])
             with c1:
-                st.metric("RMSE (best)", f"{metrics['rmse']:,.2f}")
+                st.markdown("**EPRR Breakdown (%)**")
+                eng = st.slider("Engineering", 0, 100, 12)
+                prep = st.slider("Preparation", 0, 100, 7)
+                remv = st.slider("Removal", 0, 100, 54)
+                remd = st.slider("Remediation", 0, 100, 27)
             with c2:
-                st.metric("R² (best)", f"{metrics['r2']:.3f}")
+                st.markdown("**Financial (%)**")
+                sst_pct = st.slider("SST", 0, 100, 0)
+                owners_pct = st.slider("Owner's Cost", 0, 100, 0)
+                cont_pct = st.slider("Contingency", 0, 100, 0)
+                esc_pct = st.slider("Escalation & Inflation", 0, 100, 0)
 
-            st.session_state._last_metrics = metrics
-            st.session_state.best_model_name_per_dataset[ds_name] = metrics.get(
-                "best_model"
-            )
-
-            toast("Training complete.")
-            st.caption(
-                f"Best model selected: **{metrics.get('best_model', 'RandomForest')}**"
-            )
-
-            # MODEL COMPARISON TABLE (6 MODELS) WITH COLOUR
-            try:
-                models_list = metrics.get("models", [])
-                if models_list:
-                    df_models = pd.DataFrame(models_list)
-                    df_models["rmse"] = df_models["rmse"].astype(float)
-                    df_models["r2"] = df_models["r2"].astype(float)
-                    df_models = df_models.set_index("model")
-                    st.markdown("##### Model comparison (6-model pool)")
-                    styled = (
-                        df_models.style.format(
-                            {"rmse": "{:,.2f}", "r2": "{:.3f}"}
-                        )
-                        .background_gradient(
-                            subset=["r2"], cmap="YlGn"
-                        )  # greener = better R²
-                        .background_gradient(
-                            subset=["rmse"], cmap="OrRd_r"
-                        )  # darker red = lower RMSE
-                    )
-                    st.dataframe(styled, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not render model comparison table: {e}")
-
-# ================================== VISUALIZATION TAB =================================
-with tab_viz:
-    if not st.session_state.datasets:
-        st.info("No dataset. Go to **Data** tab to upload or load.")
-    else:
-        ds_name = st.selectbox(
-            "Dataset for visualization",
-            list(st.session_state.datasets.keys()),
-            key="ds_viz",
-        )
-        df = st.session_state.datasets[ds_name]
-        imputed = pd.DataFrame(
-            KNNImputer(n_neighbors=5).fit_transform(df), columns=df.columns
-        )
-        X = imputed.iloc[:, :-1]
-        y = imputed.iloc[:, -1]
-        target_column = y.name
-
-        # Correlation Matrix
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>',
-            unsafe_allow_html=True,
-        )
-        corr = imputed.corr(numeric_only=True)
-        fig = px.imshow(
-            corr,
-            text_auto=".2f",
-            aspect="auto",
-            color_continuous_scale="RdBu_r",
-            zmin=-1,
-            zmax=1,
-        )
-        fig.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor=PETRONAS["white"],
-            plot_bgcolor=PETRONAS["white"],
-            font=dict(color=PETRONAS["black"]),
-            xaxis=dict(color=PETRONAS["black"]),
-            yaxis=dict(color=PETRONAS["black"]),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-        # Feature Importance (RandomForest for explainability only)
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Feature Importance</h4><p>Model</p>',
-            unsafe_allow_html=True,
-        )
-        scaler = MinMaxScaler().fit(X)
-        model = RandomForestRegressor(random_state=42).fit(
-            scaler.transform(X), y
-        )
-        importances = model.feature_importances_
-        fi = (
-            pd.DataFrame(
-                {"feature": X.columns, "importance": importances}
-            ).sort_values("importance", ascending=True)
-        )
-        fig2 = go.Figure(
-            go.Bar(
-                x=fi["importance"],
-                y=fi["feature"],
-                orientation="h",
-                marker_color=PETRONAS["teal"],
-            )
-        )
-        fig2.update_layout(
-            xaxis_title="Importance",
-            yaxis_title="Feature",
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor=PETRONAS["white"],
-            plot_bgcolor=PETRONAS["white"],
-            font=dict(color=PETRONAS["black"]),
-            xaxis=dict(color=PETRONAS["black"]),
-            yaxis=dict(color=PETRONAS["black"]),
-        )
-        st.plotly_chart(fig2, use_container_width=True)
-        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-        # Cost Curve
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>',
-            unsafe_allow_html=True,
-        )
-        feat = st.selectbox("Select feature for cost curve", X.columns)
-        x_vals = imputed[feat].values
-        y_vals = y.values
-        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-
-        scatter_df = pd.DataFrame(
-            {feat: x_vals[mask], target_column: y_vals[mask]}
-        )
-        fig3 = px.scatter(scatter_df, x=feat, y=target_column, opacity=0.65)
-        fig3.update_traces(marker=dict(color=PETRONAS["teal"]))
-
-        if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
-            xv = scatter_df[feat].to_numpy(dtype=float)
-            yv = scatter_df[target_column].to_numpy(dtype=float)
-            slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
-            x_line = np.linspace(xv.min(), xv.max(), 100)
-            y_line = slope * x_line + intercept
-            fig3.add_trace(
-                go.Scatter(
-                    x=x_line,
-                    y=y_line,
-                    mode="lines",
-                    name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
-                    line=dict(color=PETRONAS["purple"]),
+            eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
+            eprr_total = sum(eprr.values())
+            if abs(eprr_total - 100) > 1e-6 and eprr_total > 0:
+                st.warning(
+                    f"EPRR total is {eprr_total}%. Consider normalizing to 100% for reporting consistency."
                 )
+
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Predict (Single)</h4><p>Step 4</p>',
+                unsafe_allow_html=True,
             )
-        else:
-            st.warning("Not enough valid/variable data to compute regression.")
-
-        fig3.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor=PETRONAS["white"],
-            plot_bgcolor=PETRONAS["white"],
-            font=dict(color=PETRONAS["black"]),
-            xaxis=dict(color=PETRONAS["black"]),
-            yaxis=dict(color=PETRONAS["black"]),
-        )
-        st.plotly_chart(fig3, use_container_width=True)
-        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-
-# ===================================== PREDICT TAB =====================================
-with tab_predict:
-    if not st.session_state.datasets:
-        st.info("No dataset. Go to **Data** tab to upload or load.")
-    else:
-        ds_name = st.selectbox(
-            "Dataset for prediction",
-            list(st.session_state.datasets.keys()),
-            key="ds_pred",
-        )
-        df = st.session_state.datasets[ds_name]
-        currency = get_currency_symbol(df)
-
-        imputed = pd.DataFrame(
-            KNNImputer(n_neighbors=5).fit_transform(df), columns=df.columns
-        )
-        X, y = imputed.iloc[:, :-1], imputed.iloc[:, -1]
-        target_column = y.name
-
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Configuration (EPRR • Taxes • Owner • Risk)</h4><p>Step 3</p>',
-            unsafe_allow_html=True,
-        )
-        c1, c2 = st.columns([1, 1])
-        with c1:
-            st.markdown("**EPRR Breakdown (%)**")
-            eng = st.slider("Engineering", 0, 100, 12)
-            prep = st.slider("Preparation", 0, 100, 7)
-            remv = st.slider("Removal", 0, 100, 54)
-            remd = st.slider("Remediation", 0, 100, 27)
-        with c2:
-            st.markdown("**Financial (%)**")
-            sst_pct = st.slider("SST", 0, 100, 0)
-            owners_pct = st.slider("Owner's Cost", 0, 100, 0)
-            cont_pct = st.slider("Contingency", 0, 100, 0)
-            esc_pct = st.slider("Escalation & Inflation", 0, 100, 0)
-
-        eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
-        eprr_total = sum(eprr.values())
-        if abs(eprr_total - 100) > 1e-6 and eprr_total > 0:
-            st.warning(
-                f"EPRR total is {eprr_total}%. Consider normalizing to 100% for reporting consistency."
+            project_name = st.text_input(
+                "Project Name",
+                placeholder="e.g., Offshore Pipeline Replacement 2025",
             )
+            st.caption("Provide feature values (leave blank for NaN).")
 
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Predict (Single)</h4><p>Step 4</p>',
-            unsafe_allow_html=True,
-        )
-        project_name = st.text_input(
-            "Project Name",
-            placeholder="e.g., Offshore Pipeline Replacement 2025",
-        )
-        st.caption("Provide feature values (leave blank for NaN).")
+            cols_per_row = 3
+            new_data = {}
+            cols = list(X.columns)
+            rows = (len(cols) + cols_per_row - 1) // cols_per_row
+            for r in range(rows):
+                row_cols = st.columns(cols_per_row)
+                for i in range(cols_per_row):
+                    idx = r * cols_per_row + i
+                    if idx < len(cols):
+                        col_name = cols[idx]
+                        with row_cols[i]:
+                            val = st.text_input(col_name, key=f"in_{col_name}")
+                            new_data[col_name] = val
 
-        cols_per_row = 3
-        new_data = {}
-        cols = list(X.columns)
-        rows = (len(cols) + cols_per_row - 1) // cols_per_row
-        for r in range(rows):
-            row_cols = st.columns(cols_per_row)
-            for i in range(cols_per_row):
-                idx = r * cols_per_row + i
-                if idx < len(cols):
-                    col_name = cols[idx]
-                    with row_cols[i]:
-                        val = st.text_input(col_name, key=f"in_{col_name}")
-                        new_data[col_name] = val
+            if st.button("Run Prediction"):
+                pred = single_prediction(X, y, new_data, dataset_name=ds_name)
+                (
+                    owners_cost,
+                    sst_cost,
+                    contingency_cost,
+                    escalation_cost,
+                    eprr_costs,
+                    grand_total,
+                ) = cost_breakdown(
+                    pred, eprr, sst_pct, owners_pct, cont_pct, esc_pct
+                )
 
-        if st.button("Run Prediction"):
-            pred = single_prediction(X, y, new_data, dataset_name=ds_name)
-            (
-                owners_cost,
-                sst_cost,
-                contingency_cost,
-                escalation_cost,
-                eprr_costs,
-                grand_total,
-            ) = cost_breakdown(
-                pred, eprr, sst_pct, owners_pct, cont_pct, esc_pct
-            )
-
-            result = {
-                "Project Name": project_name,
-                **{c: new_data[c] for c in cols},
-                target_column: round(pred, 2),
-            }
-            for k, v in eprr_costs.items():
-                result[f"{k} Cost"] = v
-            result["SST Cost"] = sst_cost
-            result["Owner's Cost"] = owners_cost
-            result["Cost Contingency"] = contingency_cost
-            result["Escalation & Inflation"] = escalation_cost
-            result["Grand Total"] = grand_total
-            st.session_state.predictions.setdefault(ds_name, []).append(result)
-            toast("Prediction added to Results.")
-
-            cA, cB, cC, cD, cE = st.columns(5)
-            with cA:
-                st.metric("Predicted", f"{currency} {pred:,.2f}")
-            with cB:
-                st.metric("Owner's", f"{currency} {owners_cost:,.2f}")
-            with cC:
-                st.metric("Contingency", f"{currency} {contingency_cost:,.2f}")
-            with cD:
-                st.metric("Escalation", f"{currency} {escalation_cost:,.2f}")
-            with cE:
-                st.metric("Grand Total", f"{currency} {grand_total:,.2f}")
-
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Batch (Excel)</h4>',
-            unsafe_allow_html=True,
-        )
-        xls = st.file_uploader(
-            "Upload Excel for batch prediction", type=["xlsx"]
-        )
-        if xls:
-            file_id = f"{xls.name}_{xls.size}_{ds_name}"
-            if file_id not in st.session_state.processed_excel_files:
-                batch_df = pd.read_excel(xls)
-                missing = [c for c in X.columns if c not in batch_df.columns]
-                if missing:
-                    st.error(
-                        f"Missing required columns in Excel: {missing}"
-                    )
-                else:
-                    model_pipe, best_name = get_trained_model_for_dataset(
-                        X, y, dataset_name=ds_name
-                    )
-                    preds = model_pipe.predict(batch_df[X.columns])
-                    batch_df[target_column] = preds
-
-                    for i, row in batch_df.iterrows():
-                        name = row.get("Project Name", f"Project {i+1}")
-                        entry = {"Project Name": name}
-                        entry.update(row[X.columns].to_dict())
-                        entry[target_column] = round(float(preds[i]), 2)
-                        (
-                            owners_cost,
-                            sst_cost,
-                            contingency_cost,
-                            escalation_cost,
-                            eprr_costs,
-                            grand_total,
-                        ) = cost_breakdown(
-                            float(preds[i]),
-                            eprr,
-                            sst_pct,
-                            owners_pct,
-                            cont_pct,
-                            esc_pct,
-                        )
-                        for k, v in eprr_costs.items():
-                            entry[f"{k} Cost"] = v
-                        entry["SST Cost"] = sst_cost
-                        entry["Owner's Cost"] = owners_cost
-                        entry["Cost Contingency"] = contingency_cost
-                        entry["Escalation & Inflation"] = escalation_cost
-                        entry["Grand Total"] = grand_total
-                        st.session_state.predictions.setdefault(
-                            ds_name, []
-                        ).append(entry)
-
-                    st.session_state.processed_excel_files.add(file_id)
-                    toast("Batch prediction complete.")
-
-# ===================================== RESULTS TAB =====================================
-with tab_results:
-    if not st.session_state.datasets:
-        st.info("No dataset. Go to **Data** tab to upload or load.")
-    else:
-        ds_name = st.selectbox(
-            "Dataset", list(st.session_state.datasets.keys()), key="ds_results"
-        )
-        preds = st.session_state.predictions.get(ds_name, [])
-
-        st.markdown(
-            f'<h4 style="margin:0;color:#000;">Project Entries</h4><p>{len(preds)} saved</p>',
-            unsafe_allow_html=True,
-        )
-        if preds:
-            if st.button("🗑️ Delete all entries"):
-                st.session_state.predictions[ds_name] = []
-                to_remove = {
-                    fid
-                    for fid in st.session_state.processed_excel_files
-                    if fid.endswith(ds_name)
+                result = {
+                    "Project Name": project_name,
+                    **{c: new_data[c] for c in cols},
+                    target_column: round(pred, 2),
                 }
-                for fid in to_remove:
-                    st.session_state.processed_excel_files.remove(fid)
-                toast("All entries removed.", "🗑️")
-                st.rerun()
+                for k, v in eprr_costs.items():
+                    result[f"{k} Cost"] = v
+                result["SST Cost"] = sst_cost
+                result["Owner's Cost"] = owners_cost
+                result["Cost Contingency"] = contingency_cost
+                result["Escalation & Inflation"] = escalation_cost
+                result["Grand Total"] = grand_total
+                st.session_state.predictions.setdefault(ds_name, []).append(result)
+                toast("Prediction added to Results.")
 
-        st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Summary Table & Export</h4><p>Download</p>',
-            unsafe_allow_html=True,
-        )
+                cA, cB, cC, cD, cE = st.columns(5)
+                with cA:
+                    st.metric("Predicted", f"{currency} {pred:,.2f}")
+                with cB:
+                    st.metric("Owner's", f"{currency} {owners_cost:,.2f}")
+                with cC:
+                    st.metric("Contingency", f"{currency} {contingency_cost:,.2f}")
+                with cD:
+                    st.metric("Escalation", f"{currency} {escalation_cost:,.2f}")
+                with cE:
+                    st.metric("Grand Total", f"{currency} {grand_total:,.2f}")
 
-        if preds:
-            df_preds = pd.DataFrame(preds)
-            df_disp = df_preds.copy()
-            num_cols = df_disp.select_dtypes(include=[np.number]).columns
-            for col in num_cols:
-                df_disp[col] = df_disp[col].apply(
-                    lambda x: format_with_commas(x)
-                )
-            st.dataframe(df_disp, use_container_width=True, height=420)
-
-            bio_xlsx = io.BytesIO()
-            df_preds.to_excel(bio_xlsx, index=False, engine="openpyxl")
-            bio_xlsx.seek(0)
-            metrics = st.session_state._last_metrics
-            metrics_json = json.dumps(
-                metrics if metrics else {"info": "No metrics"},
-                indent=2,
-                default=float,
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Batch (Excel)</h4>',
+                unsafe_allow_html=True,
             )
-
-            zip_bio = io.BytesIO()
-            with zipfile.ZipFile(
-                zip_bio, "w", zipfile.ZIP_DEFLATED
-            ) as zf:
-                zf.writestr(
-                    f"{ds_name}_predictions.xlsx", bio_xlsx.getvalue()
-                )
-                zf.writestr(f"{ds_name}_metrics.json", metrics_json)
-            zip_bio.seek(0)
-
-            st.download_button(
-                "⬇️ Download All (ZIP)",
-                data=zip_bio.getvalue(),
-                file_name=f"{ds_name}_capex_all.zip",
-                mime="application/zip",
+            xls = st.file_uploader(
+                "Upload Excel for batch prediction", type=["xlsx"]
             )
+            if xls:
+                file_id = f"{xls.name}_{xls.size}_{ds_name}"
+                if file_id not in st.session_state.processed_excel_files:
+                    batch_df = pd.read_excel(xls)
+                    missing = [c for c in X.columns if c not in batch_df.columns]
+                    if missing:
+                        st.error(
+                            f"Missing required columns in Excel: {missing}"
+                        )
+                    else:
+                        model_pipe, best_name = get_trained_model_for_dataset(
+                            X, y, dataset_name=ds_name
+                        )
+                        preds = model_pipe.predict(batch_df[X.columns])
+                        batch_df[target_column] = preds
+
+                        for i, row in batch_df.iterrows():
+                            name = row.get("Project Name", f"Project {i+1}")
+                            entry = {"Project Name": name}
+                            entry.update(row[X.columns].to_dict())
+                            entry[target_column] = round(float(preds[i]), 2)
+                            (
+                                owners_cost,
+                                sst_cost,
+                                contingency_cost,
+                                escalation_cost,
+                                eprr_costs,
+                                grand_total,
+                            ) = cost_breakdown(
+                                float(preds[i]),
+                                eprr,
+                                sst_pct,
+                                owners_pct,
+                                cont_pct,
+                                esc_pct,
+                            )
+                            for k, v in eprr_costs.items():
+                                entry[f"{k} Cost"] = v
+                            entry["SST Cost"] = sst_cost
+                            entry["Owner's Cost"] = owners_cost
+                            entry["Cost Contingency"] = contingency_cost
+                            entry["Escalation & Inflation"] = escalation_cost
+                            entry["Grand Total"] = grand_total
+                            st.session_state.predictions.setdefault(
+                                ds_name, []
+                            ).append(entry)
+
+                        st.session_state.processed_excel_files.add(file_id)
+                        toast("Batch prediction complete.")
+
+    # ===================================== RESULTS SUB-TAB ===============================
+    with sub_results:
+        if not st.session_state.datasets:
+            st.info("No dataset. Go to **Data** sub-tab to upload or load.")
         else:
-            st.info("No data to export yet.")
+            ds_name = st.selectbox(
+                "Dataset", list(st.session_state.datasets.keys()), key="ds_results"
+            )
+            preds = st.session_state.predictions.get(ds_name, [])
+
+            st.markdown(
+                f'<h4 style="margin:0;color:#000;">Project Entries</h4><p>{len(preds)} saved</p>',
+                unsafe_allow_html=True,
+            )
+            if preds:
+                if st.button("🗑️ Delete all entries"):
+                    st.session_state.predictions[ds_name] = []
+                    to_remove = {
+                        fid
+                        for fid in st.session_state.processed_excel_files
+                        if fid.endswith(ds_name)
+                    }
+                    for fid in to_remove:
+                        st.session_state.processed_excel_files.remove(fid)
+                    toast("All entries removed.", "🗑️")
+                    st.rerun()
+
+            st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+            st.markdown(
+                '<h4 style="margin:0;color:#000;">Summary Table & Export</h4><p>Download</p>',
+                unsafe_allow_html=True,
+            )
+
+            if preds:
+                df_preds = pd.DataFrame(preds)
+                df_disp = df_preds.copy()
+                num_cols = df_disp.select_dtypes(include=[np.number]).columns
+                for col in num_cols:
+                    df_disp[col] = df_disp[col].apply(
+                        lambda x: format_with_commas(x)
+                    )
+                st.dataframe(df_disp, use_container_width=True, height=420)
+
+                bio_xlsx = io.BytesIO()
+                df_preds.to_excel(bio_xlsx, index=False, engine="openpyxl")
+                bio_xlsx.seek(0)
+                metrics = st.session_state._last_metrics
+                metrics_json = json.dumps(
+                    metrics if metrics else {"info": "No metrics"},
+                    indent=2,
+                    default=float,
+                )
+
+                zip_bio = io.BytesIO()
+                with zipfile.ZipFile(
+                    zip_bio, "w", zipfile.ZIP_DEFLATED
+                ) as zf:
+                    zf.writestr(
+                        f"{ds_name}_predictions.xlsx", bio_xlsx.getvalue()
+                    )
+                    zf.writestr(f"{ds_name}_metrics.json", metrics_json)
+                zip_bio.seek(0)
+
+                st.download_button(
+                    "⬇️ Download All (ZIP)",
+                    data=zip_bio.getvalue(),
+                    file_name=f"{ds_name}_capex_all.zip",
+                    mime="application/zip",
+                )
+            else:
+                st.info("No data to export yet.")
 
 # ============================== PROJECT BUILDER TAB ====================================
 with tab_pb:
