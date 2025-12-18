@@ -826,7 +826,43 @@ with tab_data:
                     st.session_state.datasets[up.name] = df
                     st.session_state.predictions.setdefault(up.name, [])
         toast("Dataset(s) added.")
+    cA, cB, cC, cD = st.columns([1, 1, 2, 1])
 
+with cA:
+    if st.button("🧹 Clear all predictions"):
+        st.session_state.predictions = {
+            k: [] for k in st.session_state.predictions.keys()
+        }
+        toast("All predictions cleared.", "🧹")
+
+with cB:
+    if st.button("🧺 Clear processed files history"):
+        st.session_state.processed_excel_files = set()
+        toast("Processed files history cleared.", "🧺")
+
+with cC:
+    if st.button("🔁 Refresh server manifest"):
+        list_csvs_from_manifest.clear()
+        toast("Server manifest refreshed.", "🔁")
+
+with cD:
+    if st.button("🗂️ Clear all uploaded / loaded files"):
+        # Remove datasets only
+        st.session_state.datasets = {}
+
+        # Remove predictions linked to datasets
+        st.session_state.predictions = {}
+
+        # Reset model-related caches
+        st.session_state.processed_excel_files = set()
+        st.session_state._last_metrics = None
+        st.session_state.best_model_name_per_dataset = {}
+
+        # ❗ DO NOT touch projects
+        # st.session_state.projects stays intact
+
+        toast("All datasets cleared. Projects preserved.", "🗂️")
+        st.rerun()
     st.divider()
     cA, cB, cC = st.columns([1, 1, 2])
     with cA:
@@ -1545,3 +1581,4 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             )
+
