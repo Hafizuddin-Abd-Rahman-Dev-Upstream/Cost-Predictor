@@ -24,7 +24,6 @@ import plotly.graph_objects as go
 
 # Viz for PPT
 import matplotlib.pyplot as plt
-import seaborn as sns
 
 # PPT export
 from pptx import Presentation
@@ -36,7 +35,6 @@ from pptx.dml.color import RGBColor
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
-
 
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
@@ -78,7 +76,10 @@ st.markdown(
     f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-html, body {{ font-family: 'Inter', sans-serif; }}
+
+html, body {{
+  font-family: 'Inter', sans-serif;
+}}
 
 [data-testid="stAppViewContainer"] {{
   background: {PETRONAS["white"]};
@@ -256,6 +257,14 @@ if "component_labels" not in st.session_state:
 if "best_model_name_per_dataset" not in st.session_state:
     st.session_state.best_model_name_per_dataset = {}
 
+# IMPORTANT: uploader reset nonce (so "clear uploaded files" truly clears the widget)
+if "uploader_nonce" not in st.session_state:
+    st.session_state.uploader_nonce = 0
+
+# Optional: "market index" cache
+if "market_index" not in st.session_state:
+    st.session_state.market_index = {"mode": "Manual", "value": 1.0, "series": None}
+
 # ---------------------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------------------
@@ -299,43 +308,19 @@ def get_currency_symbol(df: pd.DataFrame):
     return ""
 
 
-def pct_stepper(label: str, key: str, default: float = 0.0, step: float = 1.0, minv: float = 0.0, maxv: float = 100.0, help_txt: str = "") -> float:
-    """
-    Plus/minus control for percentages (replaces slider).
-    Stores value in st.session_state[key].
-    """
-    if key not in st.session_state:
-        st.session_state[key] = float(default)
-
-    c_minus, c_val, c_plus = st.columns([1, 2, 1])
-
-    with c_minus:
-        if st.button("−", key=f"{key}_minus"):
-            st.session_state[key] = float(max(minv, st.session_state[key] - step))
-
-    with c_val:
-        st.number_input(
-            label,
-            min_value=float(minv),
-            max_value=float(maxv),
-            value=float(st.session_state[key]),
-            step=float(step),
-            key=key,
-            help=help_txt,
-        )
-
-    with c_plus:
-        if st.button("+", key=f"{key}_plus"):
-            st.session_state[key] = float(min(maxv, st.session_state[key] + step))
-
-    return float(st.session_state[key])
-
-
-def normalize_pct_dict_to_100(d: dict):
-    total = float(sum(d.values()))
+def normalize_to_100(d: dict):
+    total = sum(float(v) for v in d.values())
     if total <= 0:
         return d, total
-    return {k: (float(v) / total) * 100.0 for k, v in d.items()}, total
+    out = {k: float(v) * 100.0 / total for k, v in d.items()}
+    # Keep sum close to 100 with rounding adjustment
+    # (optional, but helps UI)
+    keys = list(out.keys())
+    rounded = {k: round(out[k], 2) for k in keys}
+    diff = 100.0 - sum(rounded.values())
+    if keys:
+        rounded[keys[-1]] = round(rounded[keys[-1]] + diff, 2)
+    return rounded, total
 
 
 def cost_breakdown(
@@ -345,14 +330,34 @@ def cost_breakdown(
     owners_pct: float,
     cont_pct: float,
     esc_pct: float,
+    market_index: float = 1.0,
 ):
-    owners_cost = round(base_pred * (owners_pct / 100.0), 2)
-    sst_cost = round(base_pred * (sst_pct / 100.0), 2)
-    contingency_cost = round((base_pred + owners_cost) * (cont_pct / 100.0), 2)
-    escalation_cost = round((base_pred + owners_cost) * (esc_pct / 100.0), 2)
-    eprr_costs = {k: round(base_pred * (v / 100.0), 2) for k, v in (eprr or {}).items()}
-    grand_total = round(base_pred + owners_cost + contingency_cost + escalation_cost, 2)
-    return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
+    """
+    base_pred: model output (base CAPEX)
+    market_index: adjustment factor (e.g., 1.08 means +8% “realtime” market adjustment)
+    """
+    adj_base = float(base_pred) * float(market_index)
+
+    owners_cost = round(adj_base * (owners_pct / 100.0), 2)
+    sst_cost = round(adj_base * (sst_pct / 100.0), 2)
+    contingency_cost = round((adj_base + owners_cost) * (cont_pct / 100.0), 2)
+    escalation_cost = round((adj_base + owners_cost) * (esc_pct / 100.0), 2)
+
+    eprr_costs = {k: round(adj_base * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
+
+    grand_total = round(adj_base + owners_cost + contingency_cost + escalation_cost, 2)
+
+    return {
+        "market_index": float(market_index),
+        "base_capex_raw": float(base_pred),
+        "base_capex_adjusted": float(adj_base),
+        "owners_cost": owners_cost,
+        "sst_cost": sst_cost,
+        "contingency_cost": contingency_cost,
+        "escalation_cost": escalation_cost,
+        "eprr_costs": eprr_costs,
+        "grand_total": grand_total,
+    }
 
 
 def project_components_df(proj):
@@ -363,12 +368,13 @@ def project_components_df(proj):
             {
                 "Component": c["component_type"],
                 "Dataset": c["dataset"],
-                "Base CAPEX": float(c["prediction"]),
+                "Base CAPEX (Adj)": float(c["breakdown"]["base_capex_adjusted"]),
                 "Owner's Cost": float(c["breakdown"]["owners_cost"]),
                 "Contingency": float(c["breakdown"]["contingency_cost"]),
                 "Escalation": float(c["breakdown"]["escalation_cost"]),
                 "SST": float(c["breakdown"]["sst_cost"]),
                 "Grand Total": float(c["breakdown"]["grand_total"]),
+                "Market Index": float(c["breakdown"].get("market_index", 1.0)),
             }
         )
     return pd.DataFrame(rows)
@@ -386,19 +392,20 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         output.seek(0)
         return output
 
-    total_capex = comps_df["Base CAPEX"].sum()
+    total_capex = comps_df["Base CAPEX (Adj)"].sum()
     total_grand = comps_df["Grand Total"].sum()
 
     summary_df = comps_df.copy()
     summary_df.loc[len(summary_df)] = {
         "Component": "TOTAL",
         "Dataset": "",
-        "Base CAPEX": total_capex,
+        "Base CAPEX (Adj)": total_capex,
         "Owner's Cost": comps_df["Owner's Cost"].sum(),
         "Contingency": comps_df["Contingency"].sum(),
         "Escalation": comps_df["Escalation"].sum(),
         "SST": comps_df["SST"].sum(),
         "Grand Total": total_grand,
+        "Market Index": "",
     }
 
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -408,7 +415,7 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         max_row = ws.max_row
         max_col = ws.max_column
 
-        for col_idx in range(3, max_col + 1):
+        for col_idx in range(3, max_col):  # numeric cols (exclude Market Index last col)
             col_letter = get_column_letter(col_idx)
             ws.conditional_formatting.add(
                 f"{col_letter}2:{col_letter}{max_row-1}",
@@ -425,6 +432,7 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
                 ),
             )
 
+        # Bar chart: Grand Total by component
         chart = BarChart()
         chart.title = "Grand Total by Component"
         data = Reference(ws, min_col=8, max_col=8, min_row=1, max_row=max_row - 1)
@@ -435,17 +443,18 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         chart.x_axis.title = "Component"
         chart.height = 10
         chart.width = 18
-        ws.add_chart(chart, "J2")
+        ws.add_chart(chart, "K2")
 
+        # Line chart: Base CAPEX trend
         line = LineChart()
-        line.title = "Base CAPEX Trend"
+        line.title = "Base CAPEX (Adjusted) Trend"
         data_capex = Reference(ws, min_col=3, max_col=3, min_row=1, max_row=max_row - 1)
         line.add_data(data_capex, titles_from_data=True)
         line.set_categories(cats)
         line.y_axis.title = f"Base CAPEX ({currency})".strip()
         line.height = 10
         line.width = 18
-        ws.add_chart(line, "J20")
+        ws.add_chart(line, "K20")
 
         comps_df.to_excel(writer, sheet_name="Components Detail", index=False)
 
@@ -458,8 +467,12 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
     prs.slide_width = Inches(10)
     prs.slide_height = Inches(7.5)
 
+    # Use safe layouts
+    layout_title_only = prs.slide_layouts[5]  # title only
+    layout_title_content = prs.slide_layouts[1]  # title + content
+
     # Title slide
-    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    slide = prs.slides.add_slide(layout_title_only)
     title = slide.shapes.title
     title.text = f"CAPEX Project Report\n{project_name}"
     p = title.text_frame.paragraphs[0]
@@ -470,34 +483,34 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
 
     comps_df = project_components_df(proj)
     comps = proj.get("components", [])
-    total_capex = comps_df["Base CAPEX"].sum() if not comps_df.empty else 0.0
+    total_capex = comps_df["Base CAPEX (Adj)"].sum() if not comps_df.empty else 0.0
     total_grand = comps_df["Grand Total"].sum() if not comps_df.empty else 0.0
 
-    # Use a normal "Title and Content" layout (commonly index 1)
-    slide = prs.slides.add_slide(prs.slide_layouts[1])
+    # Summary slide
+    slide = prs.slides.add_slide(layout_title_content)
     slide.shapes.title.text = "Executive Summary"
-
-    txBox = slide.shapes.add_textbox(Inches(0.7), Inches(1.5), Inches(8.6), Inches(4.8))
-    tf = txBox.text_frame
-    tf.word_wrap = True
+    body = slide.shapes.placeholders[1].text_frame
+    body.clear()
 
     lines = [
         f"Project: {project_name}",
-        "",
         f"Total Components: {len(comps)}",
-        f"Total Base CAPEX: {currency} {total_capex:,.2f}",
+        f"Total Base CAPEX (Adjusted): {currency} {total_capex:,.2f}",
         f"Total Grand Total: {currency} {total_grand:,.2f}",
         "",
         "Components:",
     ]
     for c in comps:
-        lines.append(f" • {c['component_type']}: {currency} {c['breakdown']['grand_total']:,.2f}")
+        lines.append(f"• {c['component_type']}: {currency} {c['breakdown']['grand_total']:,.2f}")
 
-    tf.text = "\n".join(lines)
-    for para in tf.paragraphs:
+    for i, line in enumerate(lines):
+        para = body.paragraphs[0] if i == 0 else body.add_paragraph()
+        para.text = line
         para.font.size = Pt(16)
 
+    # Charts slides
     if not comps_df.empty:
+        # Grand Total by Component
         fig, ax = plt.subplots(figsize=(7, 4))
         ax.bar(comps_df["Component"], comps_df["Grand Total"])
         ax.set_title("Grand Total by Component")
@@ -511,20 +524,27 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
         plt.close(fig)
         img_stream.seek(0)
 
-        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide = prs.slides.add_slide(layout_title_only)
         slide.shapes.title.text = "Grand Total by Component"
         slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
+        # Stacked cost composition
         fig2, ax2 = plt.subplots(figsize=(7, 4))
         labels = comps_df["Component"]
-        base = comps_df["Base CAPEX"]
+        base = comps_df["Base CAPEX (Adj)"]
         owners = comps_df["Owner's Cost"]
         cont = comps_df["Contingency"]
         esc = comps_df["Escalation"]
         sst = comps_df["SST"]
 
         bottom = np.zeros(len(labels))
-        for vals, lab in [(base, "Base CAPEX"), (owners, "Owner"), (cont, "Contingency"), (esc, "Escalation"), (sst, "SST")]:
+        for vals, lab in [
+            (base, "Base CAPEX (Adj)"),
+            (owners, "Owner"),
+            (cont, "Contingency"),
+            (esc, "Escalation"),
+            (sst, "SST"),
+        ]:
             ax2.bar(labels, vals, bottom=bottom, label=lab)
             bottom += np.array(vals)
 
@@ -540,7 +560,7 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
         plt.close(fig2)
         img_stream2.seek(0)
 
-        slide2 = prs.slides.add_slide(prs.slide_layouts[1])
+        slide2 = prs.slides.add_slide(layout_title_only)
         slide2.shapes.title.text = "Cost Composition by Component"
         slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
@@ -556,7 +576,7 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
     summary_rows = []
     for name, proj in projects_dict.items():
         dfc = project_components_df(proj)
-        capex = dfc["Base CAPEX"].sum() if not dfc.empty else 0.0
+        capex = dfc["Base CAPEX (Adj)"].sum() if not dfc.empty else 0.0
         owners = dfc["Owner's Cost"].sum() if not dfc.empty else 0.0
         cont = dfc["Contingency"].sum() if not dfc.empty else 0.0
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
@@ -566,7 +586,7 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
             {
                 "Project": name,
                 "Components": len(proj.get("components", [])),
-                "CAPEX Sum": capex,
+                "CAPEX Sum (Adj)": capex,
                 "Owner": owners,
                 "Contingency": cont,
                 "Escalation": esc,
@@ -629,7 +649,9 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
     prs.slide_width = Inches(10)
     prs.slide_height = Inches(7.5)
 
-    slide = prs.slides.add_slide(prs.slide_layouts[5])
+    layout_title_only = prs.slide_layouts[5]
+
+    slide = prs.slides.add_slide(layout_title_only)
     title = slide.shapes.title
     title.text = "CAPEX Project Comparison"
     p = title.text_frame.paragraphs[0]
@@ -640,23 +662,13 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
     rows = []
     for name, proj in projects_dict.items():
         dfc = project_components_df(proj)
-        capex = dfc["Base CAPEX"].sum() if not dfc.empty else 0.0
+        capex = dfc["Base CAPEX (Adj)"].sum() if not dfc.empty else 0.0
         owners = dfc["Owner's Cost"].sum() if not dfc.empty else 0.0
         cont = dfc["Contingency"].sum() if not dfc.empty else 0.0
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
         sst = dfc["SST"].sum() if not dfc.empty else 0.0
         grand = dfc["Grand Total"].sum() if not dfc.empty else 0.0
-        rows.append(
-            {
-                "Project": name,
-                "CAPEX Sum": capex,
-                "Owner": owners,
-                "Contingency": cont,
-                "Escalation": esc,
-                "SST": sst,
-                "Grand Total": grand,
-            }
-        )
+        rows.append({"Project": name, "CAPEX Sum (Adj)": capex, "Owner": owners, "Contingency": cont, "Escalation": esc, "SST": sst, "Grand Total": grand})
     df_proj = pd.DataFrame(rows)
 
     if not df_proj.empty:
@@ -673,20 +685,20 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
         plt.close(fig)
         img_stream.seek(0)
 
-        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide = prs.slides.add_slide(layout_title_only)
         slide.shapes.title.text = "Grand Total by Project"
         slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
         fig2, ax2 = plt.subplots(figsize=(7, 4))
         labels = df_proj["Project"]
-        base = df_proj["CAPEX Sum"]
+        base = df_proj["CAPEX Sum (Adj)"]
         owners = df_proj["Owner"]
         cont = df_proj["Contingency"]
         esc = df_proj["Escalation"]
         sst = df_proj["SST"]
 
         bottom = np.zeros(len(labels))
-        for vals, lab in [(base, "Base CAPEX"), (owners, "Owner"), (cont, "Contingency"), (esc, "Escalation"), (sst, "SST")]:
+        for vals, lab in [(base, "Base CAPEX (Adj)"), (owners, "Owner"), (cont, "Contingency"), (esc, "Escalation"), (sst, "SST")]:
             ax2.bar(labels, vals, bottom=bottom, label=lab)
             bottom += np.array(vals)
 
@@ -702,7 +714,7 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
         plt.close(fig2)
         img_stream2.seek(0)
 
-        slide2 = prs.slides.add_slide(prs.slide_layouts[1])
+        slide2 = prs.slides.add_slide(layout_title_only)
         slide2.shapes.title.text = "Cost Composition by Project"
         slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
@@ -751,7 +763,11 @@ def evaluate_model(X, y, test_size=0.2, random_state=42):
     best_rmse = None
 
     for name, ctor in MODEL_CANDIDATES.items():
-        base_model = ctor(random_state)
+        try:
+            base_model = ctor(random_state)
+        except TypeError:
+            base_model = ctor()
+
         pipe = Pipeline(
             steps=[
                 ("imputer", SimpleImputer(strategy="median")),
@@ -770,7 +786,8 @@ def evaluate_model(X, y, test_size=0.2, random_state=42):
             best_name = name
 
     rows_sorted = sorted(rows, key=lambda d: d["r2"], reverse=True)
-    return {"best_model": best_name, "rmse": best_rmse, "r2": best_r2, "models": rows_sorted}
+    metrics = {"best_model": best_name, "rmse": best_rmse, "r2": best_r2, "models": rows_sorted}
+    return metrics
 
 
 def get_trained_model_for_dataset(X, y, dataset_name: str, random_state=42):
@@ -783,7 +800,11 @@ def get_trained_model_for_dataset(X, y, dataset_name: str, random_state=42):
         st.session_state._last_metrics = metrics
 
     ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
-    base_model = ctor(random_state)
+    try:
+        base_model = ctor(random_state)
+    except TypeError:
+        base_model = ctor()
+
     pipe = Pipeline(
         steps=[
             ("imputer", SimpleImputer(strategy="median")),
@@ -818,7 +839,7 @@ nav_labels = ["SHALLOW WATER", "DEEP WATER", "ONSHORE", "UNCON", "CCS"]
 nav_cols = st.columns(len(nav_labels))
 for col, label in zip(nav_cols, nav_labels):
     with col:
-        url = SHAREPOINT_LINKS.get(label.title(), "#")  # safe mapping
+        url = SHAREPOINT_LINKS.get(label.title(), "#")
         st.markdown(
             f'''
             <a href="{url}" target="_blank" rel="noopener"
@@ -836,14 +857,17 @@ for col, label in zip(nav_cols, nav_labels):
 tab_data, tab_pb, tab_compare = st.tabs(["📊 Data", "🏗️ Project Builder", "🔀 Compare Projects"])
 
 
-# ===================================== DATA TAB =========================
+# =======================================================================================
+# DATA TAB
+# =======================================================================================
 with tab_data:
     st.markdown('<h3 style="margin-top:0;color:#000;">📁 Data</h3>', unsafe_allow_html=True)
-    st.markdown('<h4 style="margin:0;color:#000;">Data Sources</h4><p></p>', unsafe_allow_html=True)
 
+    st.markdown('<h4 style="margin:0;color:#000;">Data Sources</h4><p></p>', unsafe_allow_html=True)
     c1, c2 = st.columns([1.2, 1])
     with c1:
         data_source = st.radio("Choose data source", ["Upload CSV", "Load from Server"], horizontal=True)
+
     with c2:
         st.caption("Enterprise Storage (SharePoint)")
         data_link = (
@@ -859,8 +883,14 @@ with tab_data:
         )
 
     uploaded_files = []
+
     if data_source == "Upload CSV":
-        uploaded_files = st.file_uploader("Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True)
+        uploaded_files = st.file_uploader(
+            "Upload CSV files (max 200MB)",
+            type="csv",
+            accept_multiple_files=True,
+            key=f"csv_uploader_{st.session_state.uploader_nonce}",
+        )
     else:
         github_csvs = list_csvs_from_manifest(DATA_FOLDER)
         if github_csvs:
@@ -869,61 +899,110 @@ with tab_data:
                 raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
                 try:
                     df = pd.read_csv(raw_url)
-                    fake = type("FakeUpload", (), {"name": selected_file})
-                    uploaded_files = [fake]
                     st.session_state.datasets[selected_file] = df
                     st.session_state.predictions.setdefault(selected_file, [])
                     toast(f"Loaded from GitHub: {selected_file}")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Error loading CSV: {e}")
         else:
             st.info("No CSV files found in GitHub folder.")
 
+    # If user uploaded
     if uploaded_files:
         for up in uploaded_files:
             if up.name not in st.session_state.datasets:
-                if hasattr(up, "read"):
+                try:
                     df = pd.read_csv(up)
-                else:
-                    df = st.session_state.datasets.get(up.name, None)
-                if df is not None:
                     st.session_state.datasets[up.name] = df
                     st.session_state.predictions.setdefault(up.name, [])
+                except Exception as e:
+                    st.error(f"Failed to read {up.name}: {e}")
         toast("Dataset(s) added.")
 
     st.divider()
 
-    # ✅ Clear buttons row (includes your NEW button, and DOES NOT delete projects)
-    cA, cB, cC, cD = st.columns([1, 1, 2, 1])
-
+    cA, cB, cC, cD = st.columns([1, 1, 1, 2])
     with cA:
         if st.button("🧹 Clear all predictions"):
             st.session_state.predictions = {k: [] for k in st.session_state.predictions.keys()}
             toast("All predictions cleared.", "🧹")
+            st.rerun()
 
     with cB:
         if st.button("🧺 Clear processed files history"):
             st.session_state.processed_excel_files = set()
             toast("Processed files history cleared.", "🧺")
+            st.rerun()
 
     with cC:
         if st.button("🔁 Refresh server manifest"):
             list_csvs_from_manifest.clear()
             toast("Server manifest refreshed.", "🔁")
+            st.rerun()
 
     with cD:
-        if st.button("🗂️ Clear all uploaded / loaded files"):
+        # NEW: Clear uploaded/loaded datasets WITHOUT deleting projects
+        if st.button("🗂️ Clear all uploaded / loaded files (keep projects)"):
             st.session_state.datasets = {}
             st.session_state.predictions = {}
             st.session_state.processed_excel_files = set()
             st.session_state._last_metrics = None
             st.session_state.best_model_name_per_dataset = {}
-            # ❗ Projects intentionally preserved
+
+            # Reset dataset selectors so UI stops referencing previous dataset keys
+            for k in ["ds_model", "ds_viz", "ds_pred", "ds_results"]:
+                if k in st.session_state:
+                    del st.session_state[k]
+
+            # Force uploader widget to reset
+            st.session_state.uploader_nonce += 1
+
             toast("All datasets cleared. Projects preserved.", "🗂️")
             st.rerun()
 
     st.divider()
 
+    # -------------------- OPTIONAL: "Realtime" Market Index / Price Adjustment --------------------
+    st.markdown('<h3 style="margin-top:0;color:#000;">📡 Market Index (Realtime Adjustment)</h3>', unsafe_allow_html=True)
+    st.caption(
+        "This DOES NOT change model training. It adjusts displayed CAPEX outputs by a market index factor (e.g., 1.08 = +8%). "
+        "Useful when your lecturer asks for a 'realtime price' overlay."
+    )
+
+    mi_mode = st.radio("Index mode", ["Manual", "Upload index CSV"], horizontal=True, key="mi_mode")
+    if mi_mode == "Manual":
+        mi_val = st.number_input("Market Index Factor", min_value=0.1, max_value=5.0, value=float(st.session_state.market_index["value"]), step=0.01)
+        st.session_state.market_index = {"mode": "Manual", "value": float(mi_val), "series": None}
+        st.info(f"All predicted base CAPEX will be multiplied by **{mi_val:.3f}** before cost add-ons.")
+    else:
+        idx_file = st.file_uploader("Upload index CSV (columns: date, index)", type=["csv"], key="idx_uploader")
+        if idx_file is not None:
+            try:
+                idx_df = pd.read_csv(idx_file)
+                # normalize col names
+                cols = {c.lower().strip(): c for c in idx_df.columns}
+                if "date" not in cols or "index" not in cols:
+                    st.error("Index CSV must contain columns named: date, index")
+                else:
+                    dfi = idx_df.rename(columns={cols["date"]: "date", cols["index"]: "index"}).copy()
+                    dfi["date"] = pd.to_datetime(dfi["date"], errors="coerce")
+                    dfi["index"] = pd.to_numeric(dfi["index"], errors="coerce")
+                    dfi = dfi.dropna(subset=["date", "index"]).sort_values("date")
+                    if dfi.empty:
+                        st.error("Index CSV parsed but ended up empty after cleaning.")
+                    else:
+                        latest_idx = float(dfi["index"].iloc[-1])
+                        st.session_state.market_index = {"mode": "Upload", "value": latest_idx, "series": dfi}
+                        st.success(f"Loaded index series. Latest index = {latest_idx:.3f}")
+                        fig_idx = px.line(dfi, x="date", y="index", title="Market Index Over Time")
+                        st.plotly_chart(fig_idx, use_container_width=True)
+            except Exception as e:
+                st.error(f"Failed to read index CSV: {e}")
+
+    st.divider()
+
+    # -------------------- Active dataset preview --------------------
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()))
         df_active = st.session_state.datasets[ds_name_data]
@@ -940,7 +1019,7 @@ with tab_data:
     else:
         st.info("Upload or load a dataset to proceed.")
 
-    # ========================= MODEL =========================
+    # ========================= SECTION: MODEL TRAINING =================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">⚙️ Model</h3>', unsafe_allow_html=True)
 
@@ -956,10 +1035,9 @@ with tab_data:
             y_model = imputed_model.iloc[:, -1]
 
         st.markdown('<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>', unsafe_allow_html=True)
-
         m1, m2 = st.columns([1, 3])
         with m1:
-            test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05, help="Fraction of data used for testing")
+            test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05)
             run_train = st.button("Run training")
         with m2:
             st.caption("Automatic best-model selection over 6 regressors (with scaling & imputation).")
@@ -967,7 +1045,6 @@ with tab_data:
         if run_train:
             with st.spinner("Training model..."):
                 metrics = evaluate_model(X_model, y_model, test_size=test_size)
-
             m3, m4 = st.columns(2)
             with m3:
                 st.metric("RMSE (best)", f"{metrics['rmse']:,.2f}")
@@ -976,6 +1053,7 @@ with tab_data:
 
             st.session_state._last_metrics = metrics
             st.session_state.best_model_name_per_dataset[ds_name_model] = metrics.get("best_model")
+
             toast("Training complete.")
             st.caption(f"Best model selected: **{metrics.get('best_model', 'RandomForest')}**")
 
@@ -993,7 +1071,7 @@ with tab_data:
             except Exception as e:
                 st.warning(f"Could not render model comparison table: {e}")
 
-    # ========================= VISUALIZATION =========================
+    # ========================= SECTION: VISUALIZATION ==================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">📈 Visualization</h3>', unsafe_allow_html=True)
 
@@ -1018,7 +1096,7 @@ with tab_data:
         model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_viz), y_viz)
         importances = model_viz.feature_importances_
         fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
-        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h", marker_color=PETRONAS["teal"]))
+        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
         fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_fi, use_container_width=True)
 
@@ -1027,10 +1105,8 @@ with tab_data:
         x_vals = imputed_viz[feat].values
         y_vals = y_viz.values
         mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-
         scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
         fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
-        fig_cc.update_traces(marker=dict(color=PETRONAS["teal"]))
 
         if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
             xv = scatter_df[feat].to_numpy(dtype=float)
@@ -1044,16 +1120,14 @@ with tab_data:
                     y=y_line,
                     mode="lines",
                     name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
-                    line=dict(color=PETRONAS["purple"]),
                 )
             )
         else:
             st.warning("Not enough valid/variable data to compute regression.")
-
         fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_cc, use_container_width=True)
 
-    # ========================= PREDICT =========================
+    # ========================= SECTION: PREDICT =======================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">🎯 Predict</h3>', unsafe_allow_html=True)
 
@@ -1068,91 +1142,118 @@ with tab_data:
         X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
         target_column_pred = y_pred.name
 
-        st.markdown(
-            '<h4 style="margin:0;color:#000;">Configuration (EPRR • Taxes • Owner • Risk)</h4><p>Step 3</p>',
-            unsafe_allow_html=True,
-        )
+        st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
 
+        # Plus/minus style: number_input with step (shows +/- controls)
         c1, c2 = st.columns([1, 1])
-
-        # ✅ EPRR now uses +/- steppers
         with c1:
             st.markdown("**EPRR Breakdown (%)**")
-            eng = pct_stepper("Engineering", key="eprr_eng", default=12, step=1)
-            prep = pct_stepper("Preparation", key="eprr_prep", default=7, step=1)
-            remv = pct_stepper("Removal", key="eprr_remv", default=54, step=1)
-            remd = pct_stepper("Remediation", key="eprr_remd", default=27, step=1)
+            eng = st.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0, step=1.0)
+            prep = st.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=7.0, step=1.0)
+            remv = st.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=54.0, step=1.0)
+            remd = st.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=27.0, step=1.0)
 
-        # ✅ Financial now uses +/- steppers too
+            eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
+            eprr_total = sum(eprr.values())
+            st.caption(f"EPRR total: **{eprr_total:.2f}%**")
+
+            ncol1, ncol2 = st.columns(2)
+            with ncol1:
+                if st.button("Normalize EPRR to 100%"):
+                    normed, _ = normalize_to_100(eprr)
+                    # Re-run by storing into session state inputs is complex; instead we apply normalization at compute time:
+                    st.session_state["_eprr_normalize_now"] = True
+                    st.success("Normalization will be applied for this run.")
+            with ncol2:
+                if st.button("Stop normalization"):
+                    st.session_state["_eprr_normalize_now"] = False
+
         with c2:
             st.markdown("**Financial (%)**")
-            sst_pct = pct_stepper("SST", key="fin_sst", default=0, step=0.5)
-            owners_pct = pct_stepper("Owner's Cost", key="fin_owners", default=0, step=0.5)
-            cont_pct = pct_stepper("Contingency", key="fin_cont", default=0, step=0.5)
-            esc_pct = pct_stepper("Escalation & Inflation", key="fin_esc", default=0, step=0.5)
+            sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            esc_pct = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
 
-        eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
-        eprr_total = sum(eprr.values())
-        if abs(eprr_total - 100) > 1e-6 and eprr_total > 0:
-            st.warning(f"EPRR total is {eprr_total:.1f}%. Consider normalizing to 100% for reporting consistency.")
-            if st.button("Normalize EPRR to 100%"):
-                eprr_norm, _t = normalize_pct_dict_to_100(eprr)
-                st.session_state["eprr_eng"] = float(eprr_norm["Engineering"])
-                st.session_state["eprr_prep"] = float(eprr_norm["Preparation"])
-                st.session_state["eprr_remv"] = float(eprr_norm["Removal"])
-                st.session_state["eprr_remd"] = float(eprr_norm["Remediation"])
-                st.rerun()
+        # Apply normalization at compute-time if user asked for it
+        apply_norm = bool(st.session_state.get("_eprr_normalize_now", False))
+        if apply_norm and eprr_total > 0 and abs(eprr_total - 100.0) > 1e-6:
+            eprr, _ = normalize_to_100(eprr)
 
         st.markdown('<h4 style="margin:0;color:#000;">Predict (Single)</h4><p>Step 4</p>', unsafe_allow_html=True)
+
         project_name = st.text_input("Project Name", placeholder="e.g., Offshore Pipeline Replacement 2025")
         st.caption("Provide feature values (leave blank for NaN).")
 
         cols_per_row = 3
         new_data = {}
         cols_pred = list(X_pred.columns)
-        rowsN = (len(cols_pred) + cols_per_row - 1) // cols_per_row
-        for r in range(rowsN):
+        rows = (len(cols_pred) + cols_per_row - 1) // cols_per_row
+        for r in range(rows):
             row_cols = st.columns(cols_per_row)
             for i in range(cols_per_row):
                 idx = r * cols_per_row + i
                 if idx < len(cols_pred):
                     col_name = cols_pred[idx]
                     with row_cols[i]:
-                        val = st.text_input(col_name, key=f"in_{col_name}")
+                        val = st.text_input(col_name, key=f"in_{ds_name_pred}_{col_name}")
                         new_data[col_name] = val
 
         if st.button("Run Prediction"):
+            market_index = float(st.session_state.market_index.get("value", 1.0))
             pred_val = single_prediction(X_pred, y_pred, new_data, dataset_name=ds_name_pred)
-            owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                pred_val, eprr, sst_pct, owners_pct, cont_pct, esc_pct
+
+            breakdown = cost_breakdown(
+                pred_val,
+                eprr=eprr,
+                sst_pct=sst_pct,
+                owners_pct=owners_pct,
+                cont_pct=cont_pct,
+                esc_pct=esc_pct,
+                market_index=market_index,
             )
 
-            result = {"Project Name": project_name, **{c: new_data[c] for c in cols_pred}, target_column_pred: round(pred_val, 2)}
-            for k, v in eprr_costs.items():
+            result = {"Project Name": project_name}
+            result.update({c: new_data.get(c, "") for c in cols_pred})
+            result[target_column_pred] = round(breakdown["base_capex_adjusted"], 2)
+
+            for k, v in breakdown["eprr_costs"].items():
                 result[f"{k} Cost"] = v
-            result["SST Cost"] = sst_cost
-            result["Owner's Cost"] = owners_cost
-            result["Cost Contingency"] = contingency_cost
-            result["Escalation & Inflation"] = escalation_cost
-            result["Grand Total"] = grand_total
+
+            result["SST Cost"] = breakdown["sst_cost"]
+            result["Owner's Cost"] = breakdown["owners_cost"]
+            result["Cost Contingency"] = breakdown["contingency_cost"]
+            result["Escalation & Inflation"] = breakdown["escalation_cost"]
+            result["Grand Total"] = breakdown["grand_total"]
+            result["Market Index"] = breakdown["market_index"]
+            result["Base CAPEX (Raw)"] = breakdown["base_capex_raw"]
 
             st.session_state.predictions.setdefault(ds_name_pred, []).append(result)
             toast("Prediction added to Results.")
 
             cA, cB, cC, cD, cE = st.columns(5)
             with cA:
-                st.metric("Predicted", f"{currency_pred} {pred_val:,.2f}")
+                st.metric("Base CAPEX (Adj)", f"{currency_pred} {breakdown['base_capex_adjusted']:,.2f}")
             with cB:
-                st.metric("Owner's", f"{currency_pred} {owners_cost:,.2f}")
+                st.metric("Owner's", f"{currency_pred} {breakdown['owners_cost']:,.2f}")
             with cC:
-                st.metric("Contingency", f"{currency_pred} {contingency_cost:,.2f}")
+                st.metric("Contingency", f"{currency_pred} {breakdown['contingency_cost']:,.2f}")
             with cD:
-                st.metric("Escalation", f"{currency_pred} {escalation_cost:,.2f}")
+                st.metric("Escalation", f"{currency_pred} {breakdown['escalation_cost']:,.2f}")
             with cE:
-                st.metric("Grand Total", f"{currency_pred} {grand_total:,.2f}")
+                st.metric("Grand Total", f"{currency_pred} {breakdown['grand_total']:,.2f}")
+
+            # Optional: show realtime/market overlay if index series exists
+            if st.session_state.market_index.get("series") is not None:
+                df_i = st.session_state.market_index["series"]
+                overlay = df_i.copy()
+                overlay["Base CAPEX (Raw)"] = breakdown["base_capex_raw"]
+                overlay["Base CAPEX (Adj)"] = overlay["Base CAPEX (Raw)"] * overlay["index"]
+                fig_overlay = px.line(overlay, x="date", y="Base CAPEX (Adj)", title="Base CAPEX adjusted by market index over time")
+                st.plotly_chart(fig_overlay, use_container_width=True)
 
         st.markdown('<h4 style="margin:0;color:#000;">Batch (Excel)</h4>', unsafe_allow_html=True)
-        xls = st.file_uploader("Upload Excel for batch prediction", type=["xlsx"])
+        xls = st.file_uploader("Upload Excel for batch prediction", type=["xlsx"], key="batch_xlsx")
         if xls:
             file_id = f"{xls.name}_{xls.size}_{ds_name_pred}"
             if file_id not in st.session_state.processed_excel_files:
@@ -1161,33 +1262,46 @@ with tab_data:
                 if missing:
                     st.error(f"Missing required columns in Excel: {missing}")
                 else:
+                    market_index = float(st.session_state.market_index.get("value", 1.0))
                     model_pipe, best_name = get_trained_model_for_dataset(X_pred, y_pred, dataset_name=ds_name_pred)
                     preds = model_pipe.predict(batch_df[X_pred.columns])
-                    batch_df[target_column_pred] = preds
 
                     for i, row in batch_df.iterrows():
                         name = row.get("Project Name", f"Project {i+1}")
+
+                        breakdown = cost_breakdown(
+                            float(preds[i]),
+                            eprr=eprr,
+                            sst_pct=sst_pct,
+                            owners_pct=owners_pct,
+                            cont_pct=cont_pct,
+                            esc_pct=esc_pct,
+                            market_index=market_index,
+                        )
+
                         entry = {"Project Name": name}
                         entry.update(row[X_pred.columns].to_dict())
-                        entry[target_column_pred] = round(float(preds[i]), 2)
+                        entry[target_column_pred] = round(breakdown["base_capex_adjusted"], 2)
 
-                        owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                            float(preds[i]), eprr, sst_pct, owners_pct, cont_pct, esc_pct
-                        )
-                        for k, v in eprr_costs.items():
+                        for k, v in breakdown["eprr_costs"].items():
                             entry[f"{k} Cost"] = v
-                        entry["SST Cost"] = sst_cost
-                        entry["Owner's Cost"] = owners_cost
-                        entry["Cost Contingency"] = contingency_cost
-                        entry["Escalation & Inflation"] = escalation_cost
-                        entry["Grand Total"] = grand_total
+                        entry["SST Cost"] = breakdown["sst_cost"]
+                        entry["Owner's Cost"] = breakdown["owners_cost"]
+                        entry["Cost Contingency"] = breakdown["contingency_cost"]
+                        entry["Escalation & Inflation"] = breakdown["escalation_cost"]
+                        entry["Grand Total"] = breakdown["grand_total"]
+                        entry["Market Index"] = breakdown["market_index"]
+                        entry["Base CAPEX (Raw)"] = breakdown["base_capex_raw"]
 
                         st.session_state.predictions.setdefault(ds_name_pred, []).append(entry)
 
                     st.session_state.processed_excel_files.add(file_id)
                     toast("Batch prediction complete.")
+                    st.rerun()
+            else:
+                st.info("This batch file was already processed (history prevents duplicates).")
 
-    # ========================= RESULTS =========================
+    # ========================= SECTION: RESULTS / EXPORT ==============================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">📄 Results</h3>', unsafe_allow_html=True)
 
@@ -1198,13 +1312,14 @@ with tab_data:
         preds = st.session_state.predictions.get(ds_name_res, [])
 
         st.markdown(f'<h4 style="margin:0;color:#000;">Project Entries</h4><p>{len(preds)} saved</p>', unsafe_allow_html=True)
-        if preds and st.button("🗑️ Delete all entries"):
-            st.session_state.predictions[ds_name_res] = []
-            to_remove = {fid for fid in st.session_state.processed_excel_files if fid.endswith(ds_name_res)}
-            for fid in to_remove:
-                st.session_state.processed_excel_files.remove(fid)
-            toast("All entries removed.", "🗑️")
-            st.rerun()
+        if preds:
+            if st.button("🗑️ Delete all entries"):
+                st.session_state.predictions[ds_name_res] = []
+                to_remove = {fid for fid in st.session_state.processed_excel_files if fid.endswith(ds_name_res)}
+                for fid in to_remove:
+                    st.session_state.processed_excel_files.remove(fid)
+                toast("All entries removed.", "🗑️")
+                st.rerun()
 
         st.markdown('<h4 style="margin:0;color:#000;">Summary Table & Export</h4><p>Download</p>', unsafe_allow_html=True)
 
@@ -1215,6 +1330,26 @@ with tab_data:
             for col in num_cols:
                 df_disp[col] = df_disp[col].apply(lambda x: format_with_commas(x))
             st.dataframe(df_disp, use_container_width=True, height=420)
+
+            # Extra graph: "realtime adjusted vs raw" for your lecturer
+            if "Base CAPEX (Raw)" in df_preds.columns and "Market Index" in df_preds.columns:
+                try:
+                    gdf = df_preds.copy()
+                    gdf["Base CAPEX (Raw)"] = pd.to_numeric(gdf["Base CAPEX (Raw)"], errors="coerce")
+                    gdf["Market Index"] = pd.to_numeric(gdf["Market Index"], errors="coerce")
+                    gdf["Base CAPEX (Adj)"] = gdf["Base CAPEX (Raw)"] * gdf["Market Index"]
+                    gdf = gdf.dropna(subset=["Base CAPEX (Raw)", "Base CAPEX (Adj)"])
+                    if not gdf.empty:
+                        fig_rt = px.bar(
+                            gdf,
+                            x="Project Name",
+                            y=["Base CAPEX (Raw)", "Base CAPEX (Adj)"],
+                            barmode="group",
+                            title="Base CAPEX Raw vs Market-Adjusted (Realtime Overlay)",
+                        )
+                        st.plotly_chart(fig_rt, use_container_width=True)
+                except Exception:
+                    pass
 
             bio_xlsx = io.BytesIO()
             df_preds.to_excel(bio_xlsx, index=False, engine="openpyxl")
@@ -1239,12 +1374,11 @@ with tab_data:
             st.info("No data to export yet.")
 
 
-# ============================== PROJECT BUILDER TAB ====================================
+# =======================================================================================
+# PROJECT BUILDER TAB
+# =======================================================================================
 with tab_pb:
-    st.markdown(
-        '<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
 
     if not st.session_state.datasets:
         st.info("No dataset. Go to **Data** tab to upload or load.")
@@ -1257,6 +1391,7 @@ with tab_pb:
                 if st.button("Create Project", key="pb_create_project_btn"):
                     st.session_state.projects[new_project_name] = {"components": [], "totals": {}, "currency": ""}
                     toast(f"Project '{new_project_name}' created.")
+                    st.rerun()
 
         if not st.session_state.projects:
             st.info("Create a project above, then add components.")
@@ -1286,8 +1421,8 @@ with tab_pb:
             feat_cols = list(X_comp.columns)
             comp_inputs = {}
             cols_per_row = 2
-            rowsN = (len(feat_cols) + cols_per_row - 1) // cols_per_row
-            for r in range(rowsN):
+            rows = (len(feat_cols) + cols_per_row - 1) // cols_per_row
+            for r in range(rows):
                 row_cols = st.columns(cols_per_row)
                 for i in range(cols_per_row):
                     idx = r * cols_per_row + i
@@ -1300,34 +1435,26 @@ with tab_pb:
             st.markdown("---")
             st.markdown("**Cost Percentage Inputs**")
             cp1, cp2 = st.columns(2)
-
-            # ✅ EPRR +/- here too
             with cp1:
-                st.markdown("EPRR (%)")
-                eng_pb = pct_stepper("Engineering", key=f"pb_eprr_eng_{proj_sel}", default=12, step=1)
-                prep_pb = pct_stepper("Preparation", key=f"pb_eprr_prep_{proj_sel}", default=7, step=1)
-                remv_pb = pct_stepper("Removal", key=f"pb_eprr_remv_{proj_sel}", default=54, step=1)
-                remd_pb = pct_stepper("Remediation", key=f"pb_eprr_remd_{proj_sel}", default=27, step=1)
+                st.markdown("EPRR (%) — use +/-")
+                eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
+                prep_pb = st.number_input("Preparation", 0.0, 100.0, 7.0, 1.0, key=f"pb_prep_{proj_sel}")
+                remv_pb = st.number_input("Removal", 0.0, 100.0, 54.0, 1.0, key=f"pb_remv_{proj_sel}")
+                remd_pb = st.number_input("Remediation", 0.0, 100.0, 27.0, 1.0, key=f"pb_remd_{proj_sel}")
 
-            # ✅ Financial +/- here too
+                eprr_pb = {"Engineering": eng_pb, "Preparation": prep_pb, "Removal": remv_pb, "Remediation": remd_pb}
+                eprr_total_pb = sum(eprr_pb.values())
+                st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
+                apply_norm_pb = st.checkbox("Normalize to 100% for this component", value=False, key=f"pb_norm_{proj_sel}")
+                if apply_norm_pb and eprr_total_pb > 0 and abs(eprr_total_pb - 100.0) > 1e-6:
+                    eprr_pb, _ = normalize_to_100(eprr_pb)
+
             with cp2:
-                st.markdown("Financial (%)")
-                sst_pb = pct_stepper("SST", key=f"pb_fin_sst_{proj_sel}", default=0, step=0.5)
-                owners_pb = pct_stepper("Owner's Cost", key=f"pb_fin_owners_{proj_sel}", default=0, step=0.5)
-                cont_pb = pct_stepper("Contingency", key=f"pb_fin_cont_{proj_sel}", default=0, step=0.5)
-                esc_pb = pct_stepper("Escalation & Inflation", key=f"pb_fin_esc_{proj_sel}", default=0, step=0.5)
-
-            eprr_pb = {"Engineering": eng_pb, "Preparation": prep_pb, "Removal": remv_pb, "Remediation": remd_pb}
-            eprr_total_pb = sum(eprr_pb.values())
-            if abs(eprr_total_pb - 100) > 1e-6 and eprr_total_pb > 0:
-                st.warning(f"EPRR total is {eprr_total_pb:.1f}%. Consider normalizing to 100% for reporting consistency.")
-                if st.button("Normalize EPRR to 100% (Project Builder)", key=f"pb_norm_{proj_sel}"):
-                    eprr_norm, _t = normalize_pct_dict_to_100(eprr_pb)
-                    st.session_state[f"pb_eprr_eng_{proj_sel}"] = float(eprr_norm["Engineering"])
-                    st.session_state[f"pb_eprr_prep_{proj_sel}"] = float(eprr_norm["Preparation"])
-                    st.session_state[f"pb_eprr_remv_{proj_sel}"] = float(eprr_norm["Removal"])
-                    st.session_state[f"pb_eprr_remd_{proj_sel}"] = float(eprr_norm["Remediation"])
-                    st.rerun()
+                st.markdown("Financial (%) — use +/-")
+                sst_pb = st.number_input("SST", 0.0, 100.0, 0.0, 0.5, key=f"pb_sst_{proj_sel}")
+                owners_pb = st.number_input("Owner's Cost", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
+                cont_pb = st.number_input("Contingency", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
+                esc_pb = st.number_input("Escalation & Inflation", 0.0, 100.0, 0.0, 0.5, key=f"pb_esc_{proj_sel}")
 
             if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
                 row_payload = {}
@@ -1342,25 +1469,34 @@ with tab_pb:
                             row_payload[f] = np.nan
 
                 try:
-                    base_pred = single_prediction(X_comp, y_comp, row_payload, dataset_name=dataset_for_comp)
-                    owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                        base_pred, eprr_pb, sst_pb, owners_pb, cont_pb, esc_pb
+                    market_index = float(st.session_state.market_index.get("value", 1.0))
+                    base_pred_raw = single_prediction(X_comp, y_comp, row_payload, dataset_name=dataset_for_comp)
+
+                    breakdown = cost_breakdown(
+                        base_pred_raw,
+                        eprr=eprr_pb,
+                        sst_pct=sst_pb,
+                        owners_pct=owners_pb,
+                        cont_pct=cont_pb,
+                        esc_pct=esc_pb,
+                        market_index=market_index,
                     )
+
+                    _, best_name = get_trained_model_for_dataset(X_comp, y_comp, dataset_name=dataset_for_comp)
 
                     comp_entry = {
                         "component_type": component_type or default_label or "Component",
                         "dataset": dataset_for_comp,
-                        "model_used": st.session_state.best_model_name_per_dataset.get(dataset_for_comp, "BestModel"),
+                        "model_used": best_name,
                         "inputs": {k: row_payload[k] for k in feat_cols},
-                        "prediction": base_pred,
+                        "prediction_raw": base_pred_raw,
                         "breakdown": {
-                            "eprr_costs": eprr_costs,
+                            **breakdown,
                             "eprr_pct": eprr_pb,
-                            "sst_cost": sst_cost,
-                            "owners_cost": owners_cost,
-                            "contingency_cost": contingency_cost,
-                            "escalation_cost": escalation_cost,
-                            "grand_total": grand_total,
+                            "sst_pct": sst_pb,
+                            "owners_pct": owners_pb,
+                            "cont_pct": cont_pb,
+                            "esc_pct": esc_pb,
                             "target_col": target_column_comp,
                         },
                     }
@@ -1369,7 +1505,9 @@ with tab_pb:
                     st.session_state.component_labels[dataset_for_comp] = component_type or default_label
                     if not st.session_state.projects[proj_sel]["currency"]:
                         st.session_state.projects[proj_sel]["currency"] = currency_ds
+
                     toast(f"Component added to project '{proj_sel}'.")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Failed to predict component CAPEX: {e}")
 
@@ -1381,30 +1519,51 @@ with tab_pb:
             if not comps:
                 st.info("No components yet. Add at least one above.")
             else:
-                rows = []
-                for c in comps:
-                    rows.append(
-                        {
-                            "Component": c["component_type"],
-                            "Dataset": c["dataset"],
-                            "Model": c.get("model_used", "N/A"),
-                            "Base CAPEX": c["prediction"],
-                            "Grand Total": c["breakdown"]["grand_total"],
-                        }
-                    )
-                dfc = pd.DataFrame(rows)
+                dfc = project_components_df(proj)
                 curr = proj.get("currency", "") or currency_ds
-                st.dataframe(dfc.style.format({"Base CAPEX": "{:,.2f}", "Grand Total": "{:,.2f}"}), use_container_width=True)
 
-                total_capex = float(sum(r["Base CAPEX"] for r in rows))
-                total_grand = float(sum(r["Grand Total"] for r in rows))
+                st.dataframe(
+                    dfc.style.format(
+                        {"Base CAPEX (Adj)": "{:,.2f}", "Grand Total": "{:,.2f}", "Market Index": "{:.3f}"}
+                    ),
+                    use_container_width=True,
+                )
+
+                total_capex = float(dfc["Base CAPEX (Adj)"].sum())
+                total_grand = float(dfc["Grand Total"].sum())
                 proj["totals"] = {"capex_sum": total_capex, "grand_total": total_grand}
 
                 col_t1, col_t2 = st.columns(2)
                 with col_t1:
-                    st.metric("Project CAPEX", f"{curr} {total_capex:,.2f}")
+                    st.metric("Project CAPEX (Adjusted)", f"{curr} {total_capex:,.2f}")
                 with col_t2:
                     st.metric("Project Grand Total", f"{curr} {total_grand:,.2f}")
+
+                st.markdown("#### Component Cost Composition")
+                comp_cost_rows = []
+                for c in comps:
+                    comp_cost_rows.append(
+                        {
+                            "Component": c["component_type"],
+                            "CAPEX": float(c["breakdown"]["base_capex_adjusted"]),
+                            "Owner": float(c["breakdown"]["owners_cost"]),
+                            "Contingency": float(c["breakdown"]["contingency_cost"]),
+                            "Escalation": float(c["breakdown"]["escalation_cost"]),
+                            "SST": float(c["breakdown"]["sst_cost"]),
+                        }
+                    )
+                df_cost = pd.DataFrame(comp_cost_rows)
+                if not df_cost.empty:
+                    df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
+                    fig_stack = px.bar(
+                        df_melt,
+                        x="Component",
+                        y="Value",
+                        color="Cost Type",
+                        barmode="stack",
+                        labels={"Value": f"Cost ({curr})"},
+                    )
+                    st.plotly_chart(fig_stack, use_container_width=True)
 
                 st.markdown("#### Components")
                 for idx, c in enumerate(comps):
@@ -1461,7 +1620,9 @@ with tab_pb:
                         st.error(f"Failed to import project JSON: {e}")
 
 
-# ============================== COMPARE PROJECTS TAB ===================================
+# =======================================================================================
+# COMPARE PROJECTS TAB
+# =======================================================================================
 with tab_compare:
     st.markdown('<h4 style="margin:0;color:#000;">Compare Projects</h4><p>Portfolio-level CAPEX view</p>', unsafe_allow_html=True)
 
@@ -1477,21 +1638,20 @@ with tab_compare:
             rows = []
             for p in compare_sel:
                 proj = st.session_state.projects[p]
-                comps = proj.get("components", [])
-                capex = owners = cont = esc = sst = 0.0
-                for c in comps:
-                    capex += float(c["prediction"])
-                    owners += float(c["breakdown"]["owners_cost"])
-                    cont += float(c["breakdown"]["contingency_cost"])
-                    esc += float(c["breakdown"]["escalation_cost"])
-                    sst += float(c["breakdown"]["sst_cost"])
-                grand_total = float(capex + owners + cont + esc)
+                dfc = project_components_df(proj)
+                capex = float(dfc["Base CAPEX (Adj)"].sum()) if not dfc.empty else 0.0
+                owners = float(dfc["Owner's Cost"].sum()) if not dfc.empty else 0.0
+                cont = float(dfc["Contingency"].sum()) if not dfc.empty else 0.0
+                esc = float(dfc["Escalation"].sum()) if not dfc.empty else 0.0
+                sst = float(dfc["SST"].sum()) if not dfc.empty else 0.0
+                grand_total = float(dfc["Grand Total"].sum()) if not dfc.empty else 0.0
+
                 proj["totals"] = {"capex_sum": capex, "grand_total": grand_total}
                 rows.append(
                     {
                         "Project": p,
-                        "Components": len(comps),
-                        "CAPEX Sum": capex,
+                        "Components": len(proj.get("components", [])),
+                        "CAPEX Sum (Adj)": capex,
                         "Owner": owners,
                         "Contingency": cont,
                         "Escalation": esc,
@@ -1502,29 +1662,69 @@ with tab_compare:
                 )
 
             df_proj = pd.DataFrame(rows)
+
             st.dataframe(
-                df_proj[["Project", "Components", "CAPEX Sum", "Grand Total"]].style.format(
-                    {"CAPEX Sum": "{:,.2f}", "Grand Total": "{:,.2f}"}
+                df_proj[["Project", "Components", "CAPEX Sum (Adj)", "Grand Total"]].style.format(
+                    {"CAPEX Sum (Adj)": "{:,.2f}", "Grand Total": "{:,.2f}"}
                 ),
                 use_container_width=True,
             )
 
             st.markdown("#### Grand Total by Project")
-            fig_gt = px.bar(df_proj, x="Project", y="Grand Total", text="Grand Total", labels={"Grand Total": "Grand Total"}, color="Project")
+            fig_gt = px.bar(df_proj, x="Project", y="Grand Total", text="Grand Total", barmode="group")
             fig_gt.update_traces(texttemplate="%{text:,.0f}", textposition="outside")
-            fig_gt.update_layout(margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(fig_gt, use_container_width=True)
 
             st.markdown("#### Stacked Cost Composition by Project")
             df_melt = df_proj.melt(
                 id_vars=["Project"],
-                value_vars=["CAPEX Sum", "Owner", "Contingency", "Escalation", "SST"],
+                value_vars=["CAPEX Sum (Adj)", "Owner", "Contingency", "Escalation", "SST"],
                 var_name="Cost Type",
                 value_name="Value",
             )
-            fig_comp = px.bar(df_melt, x="Project", y="Value", color="Cost Type", barmode="stack", labels={"Value": "Cost"})
-            fig_comp.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+            fig_comp = px.bar(df_melt, x="Project", y="Value", color="Cost Type", barmode="stack")
             st.plotly_chart(fig_comp, use_container_width=True)
+
+            st.markdown("#### Component-Level Details")
+            for p in compare_sel:
+                proj = st.session_state.projects[p]
+                comps = proj.get("components", [])
+                if not comps:
+                    continue
+                with st.expander(f"Project: {p}"):
+                    rows_c = []
+                    for c in comps:
+                        eprr_costs = c["breakdown"].get("eprr_costs", {})
+                        eprr_str = ", ".join(f"{k}: {v:,.0f}" for k, v in eprr_costs.items() if float(v) != 0)
+                        rows_c.append(
+                            {
+                                "Component": c["component_type"],
+                                "Dataset": c["dataset"],
+                                "Base CAPEX (Adj)": c["breakdown"]["base_capex_adjusted"],
+                                "Owner": c["breakdown"]["owners_cost"],
+                                "Contingency": c["breakdown"]["contingency_cost"],
+                                "Escalation": c["breakdown"]["escalation_cost"],
+                                "SST": c["breakdown"]["sst_cost"],
+                                "Grand Total": c["breakdown"]["grand_total"],
+                                "EPRR Costs": eprr_str,
+                                "Market Index": c["breakdown"].get("market_index", 1.0),
+                            }
+                        )
+                    df_compd = pd.DataFrame(rows_c)
+                    st.dataframe(
+                        df_compd.style.format(
+                            {
+                                "Base CAPEX (Adj)": "{:,.2f}",
+                                "Owner": "{:,.2f}",
+                                "Contingency": "{:,.2f}",
+                                "Escalation": "{:,.2f}",
+                                "SST": "{:,.2f}",
+                                "Grand Total": "{:,.2f}",
+                                "Market Index": "{:.3f}",
+                            }
+                        ),
+                        use_container_width=True,
+                    )
 
             st.markdown("---")
             st.markdown("#### Download Comparison Reports")
