@@ -1,7 +1,6 @@
 import io
 import json
 import zipfile
-import time
 import requests
 import numpy as np
 import pandas as pd
@@ -18,7 +17,6 @@ from sklearn.tree import DecisionTreeRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score
 from scipy.stats import linregress
-from scipy.optimize import differential_evolution  # ✅ FREE prescriptive optimizer
 
 # Viz in-app
 import plotly.express as px
@@ -258,9 +256,6 @@ if "component_labels" not in st.session_state:
     st.session_state.component_labels = {}
 if "best_model_name_per_dataset" not in st.session_state:
     st.session_state.best_model_name_per_dataset = {}
-# ✅ store metrics per dataset (for MC model-error sigma)
-if "metrics_per_dataset" not in st.session_state:
-    st.session_state.metrics_per_dataset = {}
 
 # IMPORTANT: uploader reset nonce (so "clear uploaded files" truly clears the widget)
 if "uploader_nonce" not in st.session_state:
@@ -309,14 +304,6 @@ def get_currency_symbol(df: pd.DataFrame):
     return ""
 
 
-# ✅ robust target detection (prefers column names containing "cost")
-def detect_target_column(df: pd.DataFrame):
-    cost_cols = [c for c in df.columns if "cost" in c.lower()]
-    if len(cost_cols) == 1:
-        return cost_cols[0]
-    return df.columns[-1]
-
-
 def normalize_to_100(d: dict):
     total = sum(float(v) for v in d.values())
     if total <= 0:
@@ -347,132 +334,6 @@ def cost_breakdown(
     grand_total = round(float(base_pred) + owners_cost + contingency_cost + escalation_cost, 2)
 
     return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
-
-
-# ✅ Monte Carlo simulation (supports model-error + animation in UI)
-def monte_carlo_capex(
-    model_pipe,
-    X_train: pd.DataFrame,
-    base_payload: dict,
-    n_sims: int = 5000,
-    input_unc_pct: float = 10.0,
-    rmse_sigma: float | None = None,
-    eprr_pct: dict | None = None,
-    sst_pct: float = 0.0,
-    owners_pct: float = 0.0,
-    cont_pct: float = 0.0,
-    esc_pct: float = 0.0,
-):
-    cols = list(X_train.columns)
-    train_min = X_train.min(numeric_only=True)
-    train_max = X_train.max(numeric_only=True)
-    train_med = X_train.median(numeric_only=True)
-
-    Xsim = pd.DataFrame(np.nan, index=range(n_sims), columns=cols)
-
-    for c in cols:
-        v = base_payload.get(c, np.nan)
-        try:
-            v = float(v) if (v is not None and str(v).strip() != "") else np.nan
-        except Exception:
-            v = np.nan
-
-        if np.isnan(v):
-            lo, hi = float(train_min[c]), float(train_max[c])
-            if np.isfinite(lo) and np.isfinite(hi) and lo < hi:
-                Xsim[c] = np.random.uniform(lo, hi, size=n_sims)
-            else:
-                Xsim[c] = float(train_med[c])
-        else:
-            spread = abs(v) * (input_unc_pct / 100.0)
-            lo, hi = v - spread, v + spread
-            Xsim[c] = np.random.uniform(lo, hi, size=n_sims)
-
-        if c in train_min.index and c in train_max.index:
-            Xsim[c] = Xsim[c].clip(lower=train_min[c], upper=train_max[c])
-
-    yhat = model_pipe.predict(Xsim)
-
-    if rmse_sigma and rmse_sigma > 0:
-        yhat = yhat + np.random.normal(0, rmse_sigma, size=n_sims)
-
-    yhat = np.maximum(yhat, 0)
-
-    def tri(p):
-        p = float(p)
-        left = max(0.0, 0.7 * p)
-        mode = p
-        right = min(100.0, 1.5 * p)
-        return np.random.triangular(left, mode, right, size=n_sims)
-
-    owners_s = tri(owners_pct)
-    cont_s = tri(cont_pct)
-    esc_s = tri(esc_pct)
-    sst_s = tri(sst_pct)
-
-    owners_cost = yhat * owners_s / 100.0
-    sst_cost = yhat * sst_s / 100.0
-    contingency_cost = (yhat + owners_cost) * cont_s / 100.0
-    escalation_cost = (yhat + owners_cost) * esc_s / 100.0
-
-    grand_total = yhat + owners_cost + contingency_cost + escalation_cost
-
-    def pct(arr):
-        return {
-            "P10": float(np.percentile(arr, 10)),
-            "P50": float(np.percentile(arr, 50)),
-            "P80": float(np.percentile(arr, 80)),
-            "P90": float(np.percentile(arr, 90)),
-            "Mean": float(np.mean(arr)),
-        }
-
-    return {
-        "base_capex": pct(yhat),
-        "grand_total": pct(grand_total),
-        "series": {"base": yhat, "grand_total": grand_total},
-    }
-
-
-# ✅ FREE prescriptive optimization using SciPy differential evolution
-def optimize_uplifts_scipy(
-    model_pipe,
-    X_train: pd.DataFrame,
-    payload_numeric: dict,
-    eprr: dict,
-    bounds=((0, 20), (0, 30), (0, 20), (0, 10)),  # owners, cont, esc, sst
-    n_iter: int = 60,
-    seed: int = 42,
-):
-    cols = list(X_train.columns)
-    row = {c: payload_numeric.get(c, np.nan) for c in cols}
-    df_in = pd.DataFrame([row], columns=cols)
-    base_pred = float(model_pipe.predict(df_in)[0])
-    base_pred = max(base_pred, 0.0)
-
-    def objective(x):
-        owners_pct, cont_pct, esc_pct, sst_pct = x
-        _, _, _, _, _, grand_total = cost_breakdown(base_pred, eprr, sst_pct, owners_pct, cont_pct, esc_pct)
-        return grand_total
-
-    result = differential_evolution(
-        objective,
-        bounds=bounds,
-        maxiter=n_iter,
-        seed=seed,
-        polish=True,
-        disp=False,
-    )
-
-    owners_opt, cont_opt, esc_opt, sst_opt = result.x
-    return {
-        "owners_pct": float(owners_opt),
-        "cont_pct": float(cont_opt),
-        "esc_pct": float(esc_opt),
-        "sst_pct": float(sst_opt),
-        "objective_grand_total": float(result.fun),
-        "success": bool(result.success),
-        "message": str(result.message),
-    }
 
 
 def project_components_df(proj):
@@ -773,9 +634,7 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
         sst = dfc["SST"].sum() if not dfc.empty else 0.0
         grand = dfc["Grand Total"].sum() if not dfc.empty else 0.0
-        rows.append(
-            {"Project": name, "CAPEX Sum": capex, "Owner": owners, "Contingency": cont, "Escalation": esc, "SST": sst, "Grand Total": grand}
-        )
+        rows.append({"Project": name, "CAPEX Sum": capex, "Owner": owners, "Contingency": cont, "Escalation": esc, "SST": sst, "Grand Total": grand})
     df_proj = pd.DataFrame(rows)
 
     if not df_proj.empty:
@@ -905,7 +764,6 @@ def get_trained_model_for_dataset(X, y, dataset_name: str, random_state=42):
         best_name = metrics.get("best_model", "RandomForest")
         st.session_state.best_model_name_per_dataset[dataset_name] = best_name
         st.session_state._last_metrics = metrics
-        st.session_state.metrics_per_dataset[dataset_name] = metrics  # ✅ store per dataset
 
     ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
     try:
@@ -1048,13 +906,13 @@ with tab_data:
             st.rerun()
 
     with cD:
+        # NEW: Clear uploaded/loaded datasets WITHOUT deleting projects
         if st.button("🗂️ Clear all uploaded / loaded files (keep projects)"):
             st.session_state.datasets = {}
             st.session_state.predictions = {}
             st.session_state.processed_excel_files = set()
             st.session_state._last_metrics = None
             st.session_state.best_model_name_per_dataset = {}
-            st.session_state.metrics_per_dataset = {}
 
             for k in ["ds_model", "ds_viz", "ds_pred", "ds_results"]:
                 if k in st.session_state:
@@ -1094,9 +952,8 @@ with tab_data:
 
         with st.spinner("Imputing & preparing..."):
             imputed_model = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_model), columns=df_model.columns)
-            tcol = detect_target_column(df_model)
-            X_model = imputed_model.drop(columns=[tcol])
-            y_model = imputed_model[tcol]
+            X_model = imputed_model.iloc[:, :-1]
+            y_model = imputed_model.iloc[:, -1]
 
         st.markdown('<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>', unsafe_allow_html=True)
         m1, m2 = st.columns([1, 3])
@@ -1118,7 +975,6 @@ with tab_data:
 
             st.session_state._last_metrics = metrics
             st.session_state.best_model_name_per_dataset[ds_name_model] = metrics.get("best_model")
-            st.session_state.metrics_per_dataset[ds_name_model] = metrics  # ✅
 
             toast("Training complete.")
             st.caption(f"Best model selected: **{metrics.get('best_model', 'RandomForest')}**")
@@ -1147,11 +1003,9 @@ with tab_data:
         ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
         df_viz = st.session_state.datasets[ds_name_viz]
         imputed_viz = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_viz), columns=df_viz.columns)
-
-        tcol_viz = detect_target_column(df_viz)
-        X_viz = imputed_viz.drop(columns=[tcol_viz])
-        y_viz = imputed_viz[tcol_viz]
-        target_column_viz = tcol_viz
+        X_viz = imputed_viz.iloc[:, :-1]
+        y_viz = imputed_viz.iloc[:, -1]
+        target_column_viz = y_viz.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
         corr = imputed_viz.corr(numeric_only=True)
@@ -1207,10 +1061,8 @@ with tab_data:
         currency_pred = get_currency_symbol(df_pred)
 
         imputed_pred = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_pred), columns=df_pred.columns)
-        tcol_pred = detect_target_column(df_pred)
-        X_pred = imputed_pred.drop(columns=[tcol_pred])
-        y_pred = imputed_pred[tcol_pred]
-        target_column_pred = tcol_pred
+        X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
+        target_column_pred = y_pred.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
 
@@ -1232,25 +1084,10 @@ with tab_data:
 
         with c2:
             st.markdown("**Financial (%)** (use +/-)")
-            # ✅ use keys so we can apply optimizer recommendations into widget state
-            sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("pred_sst", 0.0)), step=0.5, key="pred_sst")
-            owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("pred_owners", 0.0)), step=0.5, key="pred_owners")
-            cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("pred_cont", 0.0)), step=0.5, key="pred_cont")
-            esc_pct = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=float(st.session_state.get("pred_esc", 0.0)), step=0.5, key="pred_esc")
-
-        st.markdown("**Prescriptive (Optimization — Free / Local)**")
-        opt_on = st.checkbox("Enable uplift optimization", value=False)
-        if opt_on:
-            col_o1, col_o2 = st.columns(2)
-            with col_o1:
-                st.caption("Bounds (%) for optimizer")
-                b_owners = st.slider("Owner's Cost bound", 0, 40, (0, 20))
-                b_cont = st.slider("Contingency bound", 0, 60, (0, 30))
-            with col_o2:
-                b_esc = st.slider("Escalation bound", 0, 40, (0, 20))
-                b_sst = st.slider("SST bound", 0, 30, (0, 10))
-
-            n_iter = st.slider("Optimization iterations", 20, 150, 60, 10)
+            sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+            esc_pct = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
 
         st.markdown('<h4 style="margin:0;color:#000;">Predict (Single)</h4><p>Step 4</p>', unsafe_allow_html=True)
 
@@ -1271,55 +1108,11 @@ with tab_data:
                         val = st.text_input(col_name, key=f"in_{ds_name_pred}_{col_name}")
                         new_data[col_name] = val
 
-        st.markdown("**Uncertainty (Monte Carlo)**")
-        mc_on = st.checkbox("Run Monte Carlo (P50/P80)", value=False)
-        mc_sims = st.number_input("Simulations", min_value=1000, max_value=20000, value=5000, step=1000)
-        mc_input_unc = st.slider("Input uncertainty ±%", min_value=0, max_value=30, value=10, step=1)
-        mc_use_model_err = st.checkbox("Include model error (RMSE)", value=True)
-        mc_animate = st.checkbox("Animate Monte Carlo histogram", value=False)
-
-        # ✅ Optimization button (needs payload present)
-        if opt_on and st.button("🧭 Suggest Optimal Uplifts"):
-            payload_numeric = {}
-            for c in cols_pred:
-                v = new_data.get(c, "")
-                try:
-                    payload_numeric[c] = float(v) if (v is not None and str(v).strip() != "") else np.nan
-                except Exception:
-                    payload_numeric[c] = np.nan
-
-            model_pipe, best_name = get_trained_model_for_dataset(X_pred, y_pred, dataset_name=ds_name_pred)
-
-            with st.spinner("Optimizing uplift settings..."):
-                rec = optimize_uplifts_scipy(
-                    model_pipe=model_pipe,
-                    X_train=X_pred,
-                    payload_numeric=payload_numeric,
-                    eprr=eprr,
-                    bounds=(tuple(b_owners), tuple(b_cont), tuple(b_esc), tuple(b_sst)),
-                    n_iter=int(n_iter),
-                )
-
-            st.success("Recommended uplift settings found.")
-            cR1, cR2, cR3, cR4 = st.columns(4)
-            cR1.metric("Owner's %", f"{rec['owners_pct']:.2f}%")
-            cR2.metric("Contingency %", f"{rec['cont_pct']:.2f}%")
-            cR3.metric("Escalation %", f"{rec['esc_pct']:.2f}%")
-            cR4.metric("SST %", f"{rec['sst_pct']:.2f}%")
-            st.caption(f"Objective (Grand Total): {currency_pred} {rec['objective_grand_total']:,.2f} | Model: {best_name}")
-
-            if st.button("✅ Apply recommended uplifts"):
-                st.session_state["pred_owners"] = float(rec["owners_pct"])
-                st.session_state["pred_cont"] = float(rec["cont_pct"])
-                st.session_state["pred_esc"] = float(rec["esc_pct"])
-                st.session_state["pred_sst"] = float(rec["sst_pct"])
-                st.rerun()
-
         if st.button("Run Prediction"):
             pred_val = single_prediction(X_pred, y_pred, new_data, dataset_name=ds_name_pred)
 
             owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                pred_val, eprr, float(st.session_state["pred_sst"]), float(st.session_state["pred_owners"]), float(st.session_state["pred_cont"]), float(st.session_state["pred_esc"])
+                pred_val, eprr, sst_pct, owners_pct, cont_pct, esc_pct
             )
 
             result = {"Project Name": project_name}
@@ -1350,89 +1143,6 @@ with tab_data:
             with cE:
                 st.metric("Grand Total", f"{currency_pred} {grand_total:,.2f}")
 
-            # ---------------- MONTE CARLO ----------------
-            if mc_on:
-                payload_numeric = {}
-                for c in cols_pred:
-                    v = new_data.get(c, "")
-                    try:
-                        payload_numeric[c] = float(v) if (v is not None and str(v).strip() != "") else np.nan
-                    except Exception:
-                        payload_numeric[c] = np.nan
-
-                rmse_sigma = None
-                ds_metrics = st.session_state.metrics_per_dataset.get(ds_name_pred)
-                if mc_use_model_err and ds_metrics and ds_metrics.get("rmse") is not None:
-                    try:
-                        rmse_sigma = float(ds_metrics["rmse"])
-                    except Exception:
-                        rmse_sigma = None
-
-                model_pipe, _ = get_trained_model_for_dataset(X_pred, y_pred, dataset_name=ds_name_pred)
-
-                mc = monte_carlo_capex(
-                    model_pipe=model_pipe,
-                    X_train=X_pred,
-                    base_payload=payload_numeric,
-                    n_sims=int(mc_sims),
-                    input_unc_pct=float(mc_input_unc),
-                    rmse_sigma=rmse_sigma,
-                    eprr_pct=eprr,
-                    sst_pct=float(st.session_state["pred_sst"]),
-                    owners_pct=float(st.session_state["pred_owners"]),
-                    cont_pct=float(st.session_state["pred_cont"]),
-                    esc_pct=float(st.session_state["pred_esc"]),
-                )
-
-                st.markdown("#### Monte Carlo Results (Grand Total)")
-                p1, p2, p3, p4 = st.columns(4)
-                with p1:
-                    st.metric("P50", f"{currency_pred} {mc['grand_total']['P50']:,.2f}")
-                with p2:
-                    st.metric("P80", f"{currency_pred} {mc['grand_total']['P80']:,.2f}")
-                with p3:
-                    st.metric("P90", f"{currency_pred} {mc['grand_total']['P90']:,.2f}")
-                with p4:
-                    st.metric("Mean", f"{currency_pred} {mc['grand_total']['Mean']:,.2f}")
-
-                gt_series = mc["series"]["grand_total"]
-
-                if mc_animate:
-                    ph = st.empty()
-                    steps = 20
-                    n = len(gt_series)
-                    for k in range(1, steps + 1):
-                        end = int(n * k / steps)
-                        part = gt_series[:end]
-                        fig_mc = px.histogram(
-                            x=part,
-                            nbins=40,
-                            labels={"x": f"Grand Total ({currency_pred})"},
-                            title=f"Grand Total Distribution — {end:,}/{n:,} sims",
-                        )
-                        ph.plotly_chart(fig_mc, use_container_width=True)
-                        time.sleep(0.06)
-                else:
-                    fig_mc = px.histogram(
-                        x=gt_series,
-                        nbins=40,
-                        labels={"x": f"Grand Total ({currency_pred})"},
-                        title="Grand Total Distribution (Monte Carlo)",
-                    )
-                    st.plotly_chart(fig_mc, use_container_width=True)
-
-                gt_sorted = np.sort(gt_series)
-                cdf = np.arange(1, len(gt_sorted) + 1) / len(gt_sorted)
-                fig_cdf = go.Figure()
-                fig_cdf.add_trace(go.Scatter(x=gt_sorted, y=cdf, mode="lines", name="CDF"))
-                fig_cdf.update_layout(
-                    title="Grand Total CDF",
-                    xaxis_title=f"Grand Total ({currency_pred})",
-                    yaxis_title="Cumulative Probability",
-                    margin=dict(l=0, r=0, t=40, b=0),
-                )
-                st.plotly_chart(fig_cdf, use_container_width=True)
-
         st.markdown('<h4 style="margin:0;color:#000;">Batch (Excel)</h4>', unsafe_allow_html=True)
         xls = st.file_uploader("Upload Excel for batch prediction", type=["xlsx"], key="batch_xlsx")
         if xls:
@@ -1450,12 +1160,7 @@ with tab_data:
                         name = row.get("Project Name", f"Project {i+1}")
 
                         owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                            float(preds[i]),
-                            eprr,
-                            float(st.session_state["pred_sst"]),
-                            float(st.session_state["pred_owners"]),
-                            float(st.session_state["pred_cont"]),
-                            float(st.session_state["pred_esc"]),
+                            float(preds[i]), eprr, sst_pct, owners_pct, cont_pct, esc_pct
                         )
 
                         entry = {"Project Name": name}
@@ -1563,10 +1268,9 @@ with tab_pb:
             currency_ds = get_currency_symbol(df_comp)
 
             imputed_comp = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_comp), columns=df_comp.columns)
-            tcol_comp = detect_target_column(df_comp)
-            X_comp = imputed_comp.drop(columns=[tcol_comp])
-            y_comp = imputed_comp[tcol_comp]
-            target_column_comp = tcol_comp
+            X_comp = imputed_comp.iloc[:, :-1]
+            y_comp = imputed_comp.iloc[:, -1]
+            target_column_comp = y_comp.name
 
             default_label = st.session_state.component_labels.get(dataset_for_comp, "")
             component_type = st.text_input(
@@ -1705,14 +1409,7 @@ with tab_pb:
                 df_cost = pd.DataFrame(comp_cost_rows)
                 if not df_cost.empty:
                     df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-                    fig_stack = px.bar(
-                        df_melt,
-                        x="Component",
-                        y="Value",
-                        color="Cost Type",
-                        barmode="stack",
-                        labels={"Value": f"Cost ({curr})"},
-                    )
+                    fig_stack = px.bar(df_melt, x="Component", y="Value", color="Cost Type", barmode="stack", labels={"Value": f"Cost ({curr})"})
                     st.plotly_chart(fig_stack, use_container_width=True)
 
                 st.markdown("#### Components")
