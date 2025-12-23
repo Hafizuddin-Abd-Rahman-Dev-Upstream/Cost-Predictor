@@ -278,30 +278,41 @@ def format_with_commas(num):
         return str(num)
 
 
-def get_currency_symbol(df: pd.DataFrame):
+def get_currency_symbol(df: pd.DataFrame) -> str:
+    scores = {"RM": 0, "USD": 0, "€": 0, "£": 0}
+
     for col in df.columns:
-        uc = col.upper()
-        if "RM" in uc:
-            return "RM"
-        if "USD" in uc or "$" in col:
-            return "USD"
-        if "€" in col:
-            return "€"
-        if "£" in col:
-            return "£"
+        s = str(col)
+        if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", s, re.I):
+            scores["RM"] += 3
+        if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", s, re.I):
+            scores["USD"] += 3
+        if "$" in s:
+            scores["USD"] += 2
+        if "€" in s:
+            scores["€"] += 3
+        if "£" in s:
+            scores["£"] += 3
+
     try:
-        sample_vals = df.iloc[:20].astype(str).values.flatten().tolist()
-        if any("RM" in v.upper() for v in sample_vals):
-            return "RM"
-        if any("€" in v for v in sample_vals):
-            return "€"
-        if any("£" in v for v in sample_vals):
-            return "£"
-        if any("$" in v for v in sample_vals):
-            return "USD"
+        vals = df.iloc[:50].astype(str).values.flatten()
+        for v in vals:
+            if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", v, re.I):
+                scores["RM"] += 1
+            if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", v, re.I):
+                scores["USD"] += 1
+            if "$" in v:
+                scores["USD"] += 1
+            if "€" in v:
+                scores["€"] += 1
+            if "£" in v:
+                scores["£"] += 1
     except Exception:
         pass
-    return ""
+
+    best = max(scores, key=scores.get)
+    return best if scores[best] > 0 else ""
+
 
 
 def normalize_to_100(d: dict):
@@ -1596,3 +1607,4 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
