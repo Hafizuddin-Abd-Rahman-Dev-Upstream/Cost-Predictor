@@ -282,22 +282,30 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
     if df is None or df.empty:
         return ""
 
-    # scan from right to left (handles trailing "Unnamed: 0" columns)
-    for col in reversed(df.columns):
-        header = str(col).strip().upper()
+    def is_junk_col(name: str) -> bool:
+        s = name.strip().upper()
+        return (
+            s == ""
+            or s in {"INDEX", "IDX"}
+            or s.startswith("UNNAMED")
+        )
 
+    for col in reversed(df.columns):
+        header = str(col)
+        if is_junk_col(header):
+            continue
+
+        h = header.upper()
+
+        # Matches: "Total Cost (Mil USD)"
+        if re.search(r"\bUSD\b", h) or "$" in header:
+            return "USD"
+        if re.search(r"\b(RM|MYR)\b", h):
+            return "RM"
         if "€" in header:
             return "€"
         if "£" in header:
             return "£"
-        if "$" in header:
-            return "USD"
-
-        # matches: "Total Cost (Mil USD)"
-        if re.search(r"\bUSD\b", header):
-            return "USD"
-        if re.search(r"\b(RM|MYR)\b", header):
-            return "RM"
 
     return ""
 
@@ -1595,6 +1603,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
