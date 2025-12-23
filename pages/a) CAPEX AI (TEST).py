@@ -279,39 +279,40 @@ def format_with_commas(num):
 
 
 def get_currency_symbol(df: pd.DataFrame) -> str:
-    scores = {"RM": 0, "USD": 0, "€": 0, "£": 0}
+    if df is None or df.empty:
+        return ""
 
-    for col in df.columns:
-        s = str(col)
-        if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", s, re.I):
-            scores["RM"] += 3
-        if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", s, re.I):
-            scores["USD"] += 3
-        if "$" in s:
-            scores["USD"] += 2
-        if "€" in s:
-            scores["€"] += 3
-        if "£" in s:
-            scores["£"] += 3
+    # ✅ Only use the last column (your USD target column)
+    last_col = df.columns[-1]
+    header = str(last_col)
 
+    # 1) header checks (token-safe)
+    if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", header, flags=re.I) or "$" in header:
+        return "USD"
+    if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", header, flags=re.I):
+        return "RM"
+    if "€" in header:
+        return "€"
+    if "£" in header:
+        return "£"
+
+    # 2) value checks (only within last column)
     try:
-        vals = df.iloc[:50].astype(str).values.flatten()
-        for v in vals:
-            if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", v, re.I):
-                scores["RM"] += 1
-            if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", v, re.I):
-                scores["USD"] += 1
-            if "$" in v:
-                scores["USD"] += 1
-            if "€" in v:
-                scores["€"] += 1
-            if "£" in v:
-                scores["£"] += 1
+        vals = df[last_col].astype(str).head(50).tolist()
+        joined = " ".join(vals)
+
+        if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", joined, flags=re.I) or "$" in joined:
+            return "USD"
+        if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", joined, flags=re.I):
+            return "RM"
+        if "€" in joined:
+            return "€"
+        if "£" in joined:
+            return "£"
     except Exception:
         pass
 
-    best = max(scores, key=scores.get)
-    return best if scores[best] > 0 else ""
+    return ""
 
 
 
@@ -1607,4 +1608,5 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
