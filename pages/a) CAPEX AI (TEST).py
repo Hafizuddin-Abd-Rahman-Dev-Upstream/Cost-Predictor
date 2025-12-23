@@ -282,35 +282,21 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
     if df is None or df.empty:
         return ""
 
-    # ✅ Only use the last column (your USD target column)
-    last_col = df.columns[-1]
-    header = str(last_col)
+    header = str(df.columns[-1]).strip().upper()
 
-    # 1) header checks (token-safe)
-    if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", header, flags=re.I) or "$" in header:
-        return "USD"
-    if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", header, flags=re.I):
-        return "RM"
+    # Handle common symbols
     if "€" in header:
         return "€"
     if "£" in header:
         return "£"
+    if "$" in header:
+        return "USD"
 
-    # 2) value checks (only within last column)
-    try:
-        vals = df[last_col].astype(str).head(50).tolist()
-        joined = " ".join(vals)
-
-        if re.search(r"(?<![A-Za-z0-9])USD(?![A-Za-z0-9])", joined, flags=re.I) or "$" in joined:
-            return "USD"
-        if re.search(r"(?<![A-Za-z0-9])RM(?![A-Za-z0-9])", joined, flags=re.I):
-            return "RM"
-        if "€" in joined:
-            return "€"
-        if "£" in joined:
-            return "£"
-    except Exception:
-        pass
+    # Token-safe currency codes (handles: "Total Cost (Mil USD)")
+    if re.search(r"\bUSD\b", header):
+        return "USD"
+    if re.search(r"\b(RM|MYR)\b", header):
+        return "RM"
 
     return ""
 
@@ -1608,6 +1594,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
