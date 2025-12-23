@@ -279,33 +279,49 @@ def format_with_commas(num):
 
 
 def get_currency_symbol(df: pd.DataFrame) -> str:
+    """
+    Currency is determined from the 'Total Cost' column header.
+    Your convention: header like 'Total Cost (Mil USD)'.
+    If 'Total Cost' column not found, fallback to rightmost non-junk column.
+    """
     if df is None or df.empty:
         return ""
 
-    def is_junk_col(name: str) -> bool:
-        s = name.strip().upper()
-        return (
-            s == ""
-            or s in {"INDEX", "IDX"}
-            or s.startswith("UNNAMED")
-        )
+    # 1) Prefer a column that matches your convention: "Total Cost (Mil USD)"
+    preferred = None
+    for c in df.columns:
+        h = str(c).strip().upper()
+        if "TOTAL" in h and "COST" in h:
+            preferred = c
+            break
 
-    for col in reversed(df.columns):
-        header = str(col)
-        if is_junk_col(header):
-            continue
+    # 2) Fallback: rightmost non-junk column (handles trailing Unnamed: 0)
+    if preferred is None:
+        for c in reversed(df.columns):
+            h = str(c).strip().upper()
+            if not h or h.startswith("UNNAMED") or h in {"INDEX", "IDX"}:
+                continue
+            preferred = c
+            break
 
-        h = header.upper()
+    if preferred is None:
+        return ""
 
-        # Matches: "Total Cost (Mil USD)"
-        if re.search(r"\bUSD\b", h) or "$" in header:
-            return "USD"
-        if re.search(r"\b(RM|MYR)\b", h):
-            return "RM"
-        if "€" in header:
-            return "€"
-        if "£" in header:
-            return "£"
+    header = str(preferred).strip().upper()
+
+    # Symbols
+    if "€" in header:
+        return "€"
+    if "£" in header:
+        return "£"
+    if "$" in header:
+        return "USD"
+
+    # Codes (matches: "Total Cost (Mil USD)")
+    if re.search(r"\bUSD\b", header):
+        return "USD"
+    if re.search(r"\b(RM|MYR)\b", header):
+        return "RM"
 
     return ""
 
@@ -1603,6 +1619,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
