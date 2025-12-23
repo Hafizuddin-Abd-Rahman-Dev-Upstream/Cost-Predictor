@@ -1357,8 +1357,8 @@ with tab_pb:
 
                     st.session_state.projects[proj_sel]["components"].append(comp_entry)
                     st.session_state.component_labels[dataset_for_comp] = component_type or default_label
-                    if not st.session_state.projects[proj_sel]["currency"]:
-                        st.session_state.projects[proj_sel]["currency"] = currency_ds
+                   
+                    st.session_state.projects[proj_sel]["currency"] = currency_ds
 
                     toast(f"Component added to project '{proj_sel}'.")
                     st.rerun()
@@ -1594,6 +1594,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
