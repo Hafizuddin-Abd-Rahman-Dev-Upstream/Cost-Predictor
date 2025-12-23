@@ -934,8 +934,6 @@ with tab_data:
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()))
         df_active = st.session_state.datasets[ds_name_data]
-        st.write("Rightmost 8 columns:", list(df_active.columns[-8:]))
-        st.write("Detected currency:", get_currency_symbol(df_active))
         currency_active = get_currency_symbol(df_active)
         colA, colB, colC = st.columns([1, 1, 1])
         with colA:
@@ -1605,6 +1603,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
