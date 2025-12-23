@@ -282,21 +282,22 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
     if df is None or df.empty:
         return ""
 
-    header = str(df.columns[-1]).strip().upper()
+    # scan from right to left (handles trailing "Unnamed: 0" columns)
+    for col in reversed(df.columns):
+        header = str(col).strip().upper()
 
-    # Handle common symbols
-    if "€" in header:
-        return "€"
-    if "£" in header:
-        return "£"
-    if "$" in header:
-        return "USD"
+        if "€" in header:
+            return "€"
+        if "£" in header:
+            return "£"
+        if "$" in header:
+            return "USD"
 
-    # Token-safe currency codes (handles: "Total Cost (Mil USD)")
-    if re.search(r"\bUSD\b", header):
-        return "USD"
-    if re.search(r"\b(RM|MYR)\b", header):
-        return "RM"
+        # matches: "Total Cost (Mil USD)"
+        if re.search(r"\bUSD\b", header):
+            return "USD"
+        if re.search(r"\b(RM|MYR)\b", header):
+            return "RM"
 
     return ""
 
@@ -1594,6 +1595,7 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
 
 
 
