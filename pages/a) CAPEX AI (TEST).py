@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import re
+
 # ML/Stats
 from sklearn.impute import KNNImputer, SimpleImputer
 from sklearn.model_selection import train_test_split
@@ -278,38 +279,48 @@ def format_with_commas(num):
         return str(num)
 
 
+# =========================
+# FIXED: currency detection
+# =========================
 def get_currency_symbol(df: pd.DataFrame) -> str:
     """
-    Currency is determined from the 'Total Cost' column header.
-    Your convention: header like 'Total Cost (Mil USD)'.
-    If 'Total Cost' column not found, fallback to rightmost non-junk column.
+    Detect currency from the target cost column.
+
+    Your rule:
+    - Currency column is usually the LAST column (e.g. "Total Cost (Mil USD)").
+    - If there are multiple "Total Cost ..." columns, choose the LAST "Total Cost" column.
+    - Fallback: choose the last non-junk column.
     """
     if df is None or df.empty:
         return ""
 
-    # 1) Prefer a column that matches your convention: "Total Cost (Mil USD)"
-    preferred = None
+    def is_junk(colname: str) -> bool:
+        h = str(colname).strip().upper()
+        return (not h) or h.startswith("UNNAMED") or h in {"INDEX", "IDX"}
+
+    # 1) Prefer LAST "Total Cost" column
+    cost_cols = []
     for c in df.columns:
         h = str(c).strip().upper()
-        if "TOTAL" in h and "COST" in h:
-            preferred = c
-            break
+        if not is_junk(c) and ("TOTAL" in h and "COST" in h):
+            cost_cols.append(c)
 
-    # 2) Fallback: rightmost non-junk column (handles trailing Unnamed: 0)
-    if preferred is None:
+    if cost_cols:
+        preferred = cost_cols[-1]  # <-- LAST Total Cost column
+    else:
+        # 2) Fallback: last non-junk column
+        preferred = None
         for c in reversed(df.columns):
-            h = str(c).strip().upper()
-            if not h or h.startswith("UNNAMED") or h in {"INDEX", "IDX"}:
-                continue
-            preferred = c
-            break
+            if not is_junk(c):
+                preferred = c
+                break
 
     if preferred is None:
         return ""
 
     header = str(preferred).strip().upper()
 
-    # Symbols
+    # symbols
     if "€" in header:
         return "€"
     if "£" in header:
@@ -317,14 +328,13 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
     if "$" in header:
         return "USD"
 
-    # Codes (matches: "Total Cost (Mil USD)")
+    # codes (strict word boundaries)
     if re.search(r"\bUSD\b", header):
         return "USD"
-    if re.search(r"\b(RM|MYR)\b", header):
+    if re.search(r"\b(MYR|RM)\b", header):
         return "RM"
 
     return ""
-
 
 
 def normalize_to_100(d: dict):
@@ -657,7 +667,17 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
         sst = dfc["SST"].sum() if not dfc.empty else 0.0
         grand = dfc["Grand Total"].sum() if not dfc.empty else 0.0
-        rows.append({"Project": name, "CAPEX Sum": capex, "Owner": owners, "Contingency": cont, "Escalation": esc, "SST": sst, "Grand Total": grand})
+        rows.append(
+            {
+                "Project": name,
+                "CAPEX Sum": capex,
+                "Owner": owners,
+                "Contingency": cont,
+                "Escalation": esc,
+                "SST": sst,
+                "Grand Total": grand,
+            }
+        )
     df_proj = pd.DataFrame(rows)
 
     if not df_proj.empty:
@@ -687,7 +707,13 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
         sst = df_proj["SST"]
 
         bottom = np.zeros(len(labels))
-        for vals, lab in [(base, "Base CAPEX"), (owners, "Owner"), (cont, "Contingency"), (esc, "Escalation"), (sst, "SST")]:
+        for vals, lab in [
+            (base, "Base CAPEX"),
+            (owners, "Owner"),
+            (cont, "Contingency"),
+            (esc, "Escalation"),
+            (sst, "SST"),
+        ]:
             ax2.bar(labels, vals, bottom=bottom, label=lab)
             bottom += np.array(vals)
 
@@ -929,7 +955,6 @@ with tab_data:
             st.rerun()
 
     with cD:
-        # NEW: Clear uploaded/loaded datasets WITHOUT deleting projects
         if st.button("🗂️ Clear all uploaded / loaded files (keep projects)"):
             st.session_state.datasets = {}
             st.session_state.predictions = {}
@@ -1382,7 +1407,8 @@ with tab_pb:
 
                     st.session_state.projects[proj_sel]["components"].append(comp_entry)
                     st.session_state.component_labels[dataset_for_comp] = component_type or default_label
-                   
+
+                    # Currency for project should follow dataset currency (USD if last target col is USD)
                     st.session_state.projects[proj_sel]["currency"] = currency_ds
 
                     toast(f"Component added to project '{proj_sel}'.")
@@ -1432,7 +1458,14 @@ with tab_pb:
                 df_cost = pd.DataFrame(comp_cost_rows)
                 if not df_cost.empty:
                     df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-                    fig_stack = px.bar(df_melt, x="Component", y="Value", color="Cost Type", barmode="stack", labels={"Value": f"Cost ({curr})"})
+                    fig_stack = px.bar(
+                        df_melt,
+                        x="Component",
+                        y="Value",
+                        color="Cost Type",
+                        barmode="stack",
+                        labels={"Value": f"Cost ({curr})"},
+                    )
                     st.plotly_chart(fig_stack, use_container_width=True)
 
                 st.markdown("#### Components")
@@ -1500,7 +1533,9 @@ with tab_compare:
     if len(proj_names) < 2:
         st.info("Create at least two projects in the Project Builder tab to compare.")
     else:
-        compare_sel = st.multiselect("Select projects to compare", proj_names, default=proj_names[:2], key="compare_projects_sel")
+        compare_sel = st.multiselect(
+            "Select projects to compare", proj_names, default=proj_names[:2], key="compare_projects_sel"
+        )
 
         if len(compare_sel) < 2:
             st.warning("Select at least two projects for a meaningful comparison.")
@@ -1619,13 +1654,3 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
-
-
-
-
-
-
-
-
-
-
