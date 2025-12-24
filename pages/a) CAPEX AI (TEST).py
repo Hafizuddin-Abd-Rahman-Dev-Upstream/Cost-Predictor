@@ -41,7 +41,7 @@ from openpyxl.utils import get_column_letter
 # PAGE CONFIG
 # ---------------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="CAPEX AI RT2025",
+    page_title="CAPEX AI RT2026",
     page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -208,7 +208,7 @@ html, body {{
 st.markdown(
     """
 <div class="petronas-hero">
-  <h1>CAPEX AI RT2025</h1>
+  <h1>CAPEX AI RT2026</h1>
   <p>Data-driven CAPEX prediction</p>
 </div>
 """,
@@ -1654,3 +1654,4 @@ with tab_compare:
                     file_name="CAPEX_Projects_Comparison.pptx",
                     mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
                 )
+
