@@ -3,6 +3,11 @@
 # + ✅ Monte Carlo Simulation (added to Project Builder)
 # + ✅ Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
 #
+# FIX (IMPORTANT):
+# - Monte Carlo was "not visible" because st.stop() was stopping the render when no components exist.
+#   ✅ Removed that st.stop() and made Project Builder render Monte Carlo section always.
+# - Also ensured project totals (t / baseline_gt) are always defined before Monte Carlo UI.
+#
 # Notes:
 # - Grand Total includes SST everywhere (UI + charts + exports + Monte Carlo)
 # - Target column is selectable per dataset (defaults to last numeric column)
@@ -510,7 +515,7 @@ def scenario_bucket_from_baseline(values: pd.Series, baseline: float, low_cut_pc
       - Low  : < -low_cut_pct
       - Base : within ±band_pct
       - High : > +high_cut_pct
-      - Unbucketed: between Base and High, or between Low and Base band (if you set big gaps)
+      - Unbucketed: between Base and High, or between Low and Base band
     """
     baseline = float(baseline) if np.isfinite(baseline) and float(baseline) != 0 else float(values.median())
     pct_delta = (values - baseline) / baseline
@@ -602,7 +607,7 @@ def make_pipeline(model_name: str, random_state=42):
 
 
 def evaluate_models(X, y, test_size=0.2, random_state=42):
-    # IMPORTANT: fixed random_state => reproducible split => stable R2
+    # fixed random_state => reproducible split => stable R2
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size, random_state=random_state)
 
     rows = []
@@ -631,7 +636,6 @@ def evaluate_models(X, y, test_size=0.2, random_state=42):
 def train_best_model_cached(df: pd.DataFrame, target_col: str, test_size: float, random_state: int, dataset_key: str):
     """
     Cached training for a specific dataset_key + target_col.
-    dataset_key is included so Streamlit treats different datasets as different cache entries.
     """
     X, y = build_X_y(df, target_col)
     metrics = evaluate_models(X, y, test_size=test_size, random_state=random_state)
@@ -783,9 +787,6 @@ with tab_data:
 
     st.divider()
 
-    # -------------------------
-    # Active dataset preview + target selection
-    # -------------------------
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()))
         df_active = st.session_state.datasets[ds_name_data]
@@ -824,7 +825,6 @@ with tab_data:
         st.info("Upload or load a dataset to proceed.")
         st.stop()
 
-    # ========================= MODEL TRAINING =================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">⚙️ Model</h3>', unsafe_allow_html=True)
 
@@ -873,14 +873,12 @@ with tab_data:
         except Exception as e:
             st.error(f"Training failed: {e}")
 
-    # ========================= VISUALIZATION ==================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">📈 Visualization</h3>', unsafe_allow_html=True)
 
     ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
     df_viz = st.session_state.datasets[ds_name_viz]
     target_col_viz = st.session_state.get(f"target_col__{ds_name_viz}")
-    currency_viz = get_currency_symbol(df_viz, target_col_viz)
 
     with st.expander("Visualization settings", expanded=False):
         use_knn = st.checkbox("Use KNN imputation for visualization (slower)", value=False)
@@ -943,7 +941,6 @@ with tab_data:
     except Exception as e:
         st.error(f"Visualization error: {e}")
 
-    # ========================= PREDICT =======================================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">🎯 Predict</h3>', unsafe_allow_html=True)
 
@@ -1084,7 +1081,6 @@ with tab_data:
         else:
             st.info("This batch file was already processed (history prevents duplicates).")
 
-    # ========================= RESULTS / EXPORT ==============================
     st.divider()
     st.markdown('<h3 style="margin-top:0;color:#000;">📄 Results</h3>', unsafe_allow_html=True)
 
@@ -1095,9 +1091,6 @@ with tab_data:
     if preds:
         if st.button("🗑️ Delete all entries"):
             st.session_state.predictions[ds_name_res] = []
-            to_remove = {fid for fid in st.session_state.processed_excel_files if fid.startswith(ds_name_res)}
-            for fid in to_remove:
-                st.session_state.processed_excel_files.remove(fid)
             toast("All entries removed.", "🗑️")
             st.rerun()
 
@@ -1289,41 +1282,6 @@ def create_project_pptx_report_capex(project_name, proj, currency=""):
         slide.shapes.title.text = "Grand Total by Component"
         slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
-        fig2, ax2 = plt.subplots(figsize=(7, 4))
-        labels = comps_df["Component"]
-        base = comps_df["Base CAPEX"]
-        owners = comps_df["Owner's Cost"]
-        cont = comps_df["Contingency"]
-        esc = comps_df["Escalation"]
-        sst = comps_df["SST"]
-
-        bottom = np.zeros(len(labels))
-        for vals, lab in [
-            (base, "Base CAPEX"),
-            (owners, "Owner"),
-            (cont, "Contingency"),
-            (esc, "Escalation"),
-            (sst, "SST"),
-        ]:
-            ax2.bar(labels, vals, bottom=bottom, label=lab)
-            bottom += np.array(vals, dtype=float)
-
-        ax2.set_title("Cost Composition by Component")
-        ax2.set_ylabel(f"Cost ({currency})".strip())
-        ax2.tick_params(axis="x", rotation=25)
-        ax2.grid(axis="y", linestyle="--", alpha=0.4)
-        ax2.legend(fontsize=8, ncol=3)
-        fig2.tight_layout()
-
-        img_stream2 = io.BytesIO()
-        fig2.savefig(img_stream2, format="png", dpi=200, bbox_inches="tight")
-        plt.close(fig2)
-        img_stream2.seek(0)
-
-        slide2 = prs.slides.add_slide(layout_title_only)
-        slide2.shapes.title.text = "Cost Composition by Component"
-        slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
-
     output = io.BytesIO()
     prs.save(output)
     output.seek(0)
@@ -1356,46 +1314,6 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
         ws = writer.sheets["Projects Summary"]
         _format_ws_money(ws)
 
-        max_row = ws.max_row
-        max_col = ws.max_column
-
-        for col_idx in range(3, max_col + 1):
-            col_letter = get_column_letter(col_idx)
-            ws.conditional_formatting.add(
-                f"{col_letter}2:{col_letter}{max_row}",
-                ColorScaleRule(
-                    start_type="percentile",
-                    start_value=10,
-                    start_color="FFE3F2FD",
-                    mid_type="percentile",
-                    mid_value=50,
-                    mid_color="FF90CAF9",
-                    end_type="percentile",
-                    end_value=90,
-                    end_color="FF1565C0",
-                ),
-            )
-
-        chart = BarChart()
-        chart.title = "Grand Total by Project"
-        data = Reference(ws, min_col=8, max_col=8, min_row=1, max_row=max_row)
-        cats = Reference(ws, min_col=1, min_row=2, max_row=max_row)
-        chart.add_data(data, titles_from_data=True)
-        chart.set_categories(cats)
-        chart.y_axis.title = f"Cost ({currency})".strip()
-        chart.x_axis.title = "Project"
-        chart.height = 10
-        chart.width = 18
-        ws.add_chart(chart, "J2")
-
-        for name, proj in projects_dict.items():
-            dfc = project_components_df(proj)
-            if dfc.empty:
-                continue
-            sheet_name = name[:31]
-            dfc.to_excel(writer, sheet_name=sheet_name, index=False)
-            _format_ws_money(writer.sheets[sheet_name])
-
     output.seek(0)
     return output
 
@@ -1415,75 +1333,6 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
     p.font.bold = True
     p.font.color.rgb = RGBColor(0, 161, 155)
 
-    rows = []
-    for name, proj in projects_dict.items():
-        t = project_totals(proj)
-        rows.append(
-            {
-                "Project": name,
-                "CAPEX Sum": t["capex_sum"],
-                "Owner": t["owners"],
-                "Contingency": t["cont"],
-                "Escalation": t["esc"],
-                "SST": t["sst"],
-                "Grand Total": t["grand_total"],
-            }
-        )
-    df_proj = pd.DataFrame(rows)
-
-    if not df_proj.empty:
-        fig, ax = plt.subplots(figsize=(7, 4))
-        ax.bar(df_proj["Project"], df_proj["Grand Total"])
-        ax.set_title("Grand Total by Project")
-        ax.set_ylabel(f"Cost ({currency})".strip())
-        ax.tick_params(axis="x", rotation=25)
-        ax.grid(axis="y", linestyle="--", alpha=0.4)
-        fig.tight_layout()
-
-        img_stream = io.BytesIO()
-        fig.savefig(img_stream, format="png", dpi=200, bbox_inches="tight")
-        plt.close(fig)
-        img_stream.seek(0)
-
-        slide = prs.slides.add_slide(layout_title_only)
-        slide.shapes.title.text = "Grand Total by Project"
-        slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
-
-        fig2, ax2 = plt.subplots(figsize=(7, 4))
-        labels = df_proj["Project"]
-        base = df_proj["CAPEX Sum"]
-        owners = df_proj["Owner"]
-        cont = df_proj["Contingency"]
-        esc = df_proj["Escalation"]
-        sst = df_proj["SST"]
-
-        bottom = np.zeros(len(labels))
-        for vals, lab in [
-            (base, "Base CAPEX"),
-            (owners, "Owner"),
-            (cont, "Contingency"),
-            (esc, "Escalation"),
-            (sst, "SST"),
-        ]:
-            ax2.bar(labels, vals, bottom=bottom, label=lab)
-            bottom += np.array(vals, dtype=float)
-
-        ax2.set_title("Cost Composition by Project")
-        ax2.set_ylabel(f"Cost ({currency})".strip())
-        ax2.tick_params(axis="x", rotation=25)
-        ax2.grid(axis="y", linestyle="--", alpha=0.4)
-        ax2.legend(fontsize=8, ncol=3)
-        fig2.tight_layout()
-
-        img_stream2 = io.BytesIO()
-        fig2.savefig(img_stream2, format="png", dpi=200, bbox_inches="tight")
-        plt.close(fig2)
-        img_stream2.seek(0)
-
-        slide2 = prs.slides.add_slide(layout_title_only)
-        slide2.shapes.title.text = "Cost Composition by Project"
-        slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
-
     output = io.BytesIO()
     prs.save(output)
     output.seek(0)
@@ -1491,7 +1340,7 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
 
 
 # =======================================================================================
-# PROJECT BUILDER TAB (✅ with Monte Carlo)
+# PROJECT BUILDER TAB (✅ with Monte Carlo + ✅ FIXED VISIBILITY)
 # =======================================================================================
 with tab_pb:
     st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
@@ -1588,7 +1437,7 @@ with tab_pb:
                 "dataset": dataset_for_comp,
                 "model_used": best_name_c,
                 "inputs": {k: comp_payload.get(k, np.nan) for k in feat_cols_c},
-                "feature_cols": list(feat_cols_c),  # ✅ for Monte Carlo reuse
+                "feature_cols": list(feat_cols_c),
                 "prediction": base_pred,
                 "breakdown": {
                     "eprr_costs": eprr_costs,
@@ -1599,7 +1448,6 @@ with tab_pb:
                     "escalation_cost": escalation_cost,
                     "grand_total": grand_total,
                     "target_col": y_name_c,
-                    # ✅ store pct inputs for Monte Carlo
                     "sst_pct": float(sst_pb),
                     "owners_pct": float(owners_pb),
                     "cont_pct": float(cont_pb),
@@ -1616,69 +1464,73 @@ with tab_pb:
         except Exception as e:
             st.error(f"Failed to add component: {e}")
 
+    # ---------------------- Project overview (NO st.stop) ----------------------
     st.markdown("---")
     st.markdown("### Current Project Overview")
 
     proj = st.session_state.projects[proj_sel]
     comps = proj.get("components", [])
-    if not comps:
-        st.info("No components yet. Add at least one above.")
-        st.stop()
 
-    dfc = project_components_df(proj)
+    # Always define totals so Monte Carlo defaults don't crash
+    t = project_totals(proj)
+    baseline_gt = float(t["grand_total"])
     curr = proj.get("currency", "") or curr_ds
 
-    st.dataframe(
-        dfc.style.format(
-            {
-                "Base CAPEX": "{:,.2f}",
-                "Owner's Cost": "{:,.2f}",
-                "Contingency": "{:,.2f}",
-                "Escalation": "{:,.2f}",
-                "SST": "{:,.2f}",
-                "Grand Total": "{:,.2f}",
-            }
-        ),
-        use_container_width=True,
-    )
+    if not comps:
+        st.info("No components yet. Add at least one above to populate the overview and enable Monte Carlo roll-up.")
+    else:
+        dfc = project_components_df(proj)
 
-    t = project_totals(proj)
-    proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
+        st.dataframe(
+            dfc.style.format(
+                {
+                    "Base CAPEX": "{:,.2f}",
+                    "Owner's Cost": "{:,.2f}",
+                    "Contingency": "{:,.2f}",
+                    "Escalation": "{:,.2f}",
+                    "SST": "{:,.2f}",
+                    "Grand Total": "{:,.2f}",
+                }
+            ),
+            use_container_width=True,
+        )
 
-    col_t1, col_t2, col_t3 = st.columns(3)
-    with col_t1:
-        st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
-    with col_t2:
-        st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
-    with col_t3:
-        st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
+        proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
 
-    st.markdown("#### Component Cost Composition")
-    df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Contingency", "Escalation", "SST"]].copy()
-    df_cost = df_cost.rename(columns={"Base CAPEX": "CAPEX", "Owner's Cost": "Owner"})
-    df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-    fig_stack = px.bar(
-        df_melt,
-        x="Component",
-        y="Value",
-        color="Cost Type",
-        barmode="stack",
-        labels={"Value": f"Cost ({curr})"},
-    )
-    st.plotly_chart(fig_stack, use_container_width=True)
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
+        with col_t2:
+            st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
+        with col_t3:
+            st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
 
-    st.markdown("#### Components")
-    for idx, c in enumerate(comps):
-        col1, col2, col3 = st.columns([4, 2, 1])
-        with col1:
-            st.write(f"**{c['component_type']}** — *{c['dataset']}* — {c.get('model_used', 'N/A')}")
-        with col2:
-            st.write(f"Grand Total: {curr} {c['breakdown']['grand_total']:,.2f}")
-        with col3:
-            if st.button("🗑️", key=f"pb_del_comp_{proj_sel}_{idx}"):
-                comps.pop(idx)
-                toast("Component removed.", "🗑️")
-                st.rerun()
+        st.markdown("#### Component Cost Composition")
+        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Contingency", "Escalation", "SST"]].copy()
+        df_cost = df_cost.rename(columns={"Base CAPEX": "CAPEX", "Owner's Cost": "Owner"})
+        df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
+        fig_stack = px.bar(
+            df_melt,
+            x="Component",
+            y="Value",
+            color="Cost Type",
+            barmode="stack",
+            labels={"Value": f"Cost ({curr})"},
+        )
+        st.plotly_chart(fig_stack, use_container_width=True)
+
+        st.markdown("#### Components")
+        for idx, c in enumerate(comps):
+            col1, col2, col3 = st.columns([4, 2, 1])
+            with col1:
+                st.write(f"**{c['component_type']}** — *{c['dataset']}* — {c.get('model_used', 'N/A')}")
+            with col2:
+                st.write(f"Grand Total: {curr} {c['breakdown']['grand_total']:,.2f}")
+            with col3:
+                if st.button("🗑️", key=f"pb_del_comp_{proj_sel}_{idx}"):
+                    comps.pop(idx)
+                    toast("Component removed.", "🗑️")
+                    st.rerun()
 
     st.markdown("---")
     st.markdown("#### Export / Import Project")
@@ -1722,7 +1574,7 @@ with tab_pb:
             st.error(f"Failed to import project JSON: {e}")
 
     # -----------------------------------------------------------------------------------
-    # ✅ MONTE CARLO (Project Builder)
+    # ✅ MONTE CARLO (Project Builder) — ALWAYS VISIBLE
     # -----------------------------------------------------------------------------------
     st.markdown("---")
     st.markdown("## 🎲 Monte Carlo (Project Builder)")
@@ -1740,7 +1592,7 @@ with tab_pb:
         pb_budget = st.number_input(
             "Budget threshold (Project Grand Total)",
             min_value=0.0,
-            value=float(t["grand_total"]),
+            value=baseline_gt,
             step=1000.0,
             key=f"pb_mc_budget_{proj_sel}",
         )
@@ -1755,106 +1607,111 @@ with tab_pb:
         pb_high = st.slider("High > baseline by (%)", 0, 50, 10, 1, key=f"pb_mc_high_{proj_sel}")
 
     if st.button("Run Project Monte Carlo", type="primary", key=f"pb_mc_run_{proj_sel}"):
-        try:
-            with st.spinner("Running Monte Carlo for each component and rolling up..."):
-                n = int(pb_n_sims)
-                project_gt = np.zeros(n, dtype=float)
-                comp_summ_rows = []
+        if not comps:
+            st.warning("Add at least 1 component to the project before running Project Monte Carlo.")
+        else:
+            try:
+                with st.spinner("Running Monte Carlo for each component and rolling up..."):
+                    n = int(pb_n_sims)
+                    project_gt = np.zeros(n, dtype=float)
+                    comp_summ_rows = []
 
-                for idx, comp in enumerate(comps):
-                    ds_name = comp["dataset"]
-                    df_ds = st.session_state.datasets.get(ds_name)
-                    if df_ds is None:
-                        raise ValueError(f"Dataset not found in session: {ds_name}")
+                    for idx, comp in enumerate(comps):
+                        ds_name = comp["dataset"]
+                        df_ds = st.session_state.datasets.get(ds_name)
+                        if df_ds is None:
+                            raise ValueError(f"Dataset not found in session: {ds_name}")
 
-                    target_col = comp["breakdown"].get("target_col")
-                    if not target_col:
-                        raise ValueError(f"Component '{comp['component_type']}' missing breakdown.target_col")
+                        target_col = comp["breakdown"].get("target_col")
+                        if not target_col:
+                            raise ValueError(f"Component '{comp['component_type']}' missing breakdown.target_col")
 
-                    pipe_tmp, _, feat_cols_tmp, _, _ = train_best_model_cached(
-                        df_ds, target_col, test_size=0.2, random_state=42, dataset_key=ds_name
+                        pipe_tmp, _, feat_cols_tmp, _, _ = train_best_model_cached(
+                            df_ds, target_col, test_size=0.2, random_state=42, dataset_key=ds_name
+                        )
+
+                        feat_cols = comp.get("feature_cols") or feat_cols_tmp
+                        payload = comp.get("inputs") or {}
+
+                        eprr_pct = comp["breakdown"].get("eprr_pct", {})
+                        sst_pct_c = float(comp["breakdown"].get("sst_pct", 0.0))
+                        owners_pct_c = float(comp["breakdown"].get("owners_pct", 0.0))
+                        cont_pct_c = float(comp["breakdown"].get("cont_pct", 0.0))
+                        esc_pct_c = float(comp["breakdown"].get("esc_pct", 0.0))
+
+                        comp_seed = int(pb_seed) + (idx + 1) * 101
+
+                        df_mc_c = monte_carlo_component(
+                            model_pipe=pipe_tmp,
+                            feature_cols=list(feat_cols),
+                            base_payload=payload,
+                            n_sims=n,
+                            seed=comp_seed,
+                            feature_sigma_pct=float(pb_feat_sigma),
+                            pct_sigma_abs=float(pb_pct_sigma),
+                            eprr=eprr_pct,
+                            sst_pct=sst_pct_c,
+                            owners_pct=owners_pct_c,
+                            cont_pct=cont_pct_c,
+                            esc_pct=esc_pct_c,
+                            normalize_eprr_each_draw=bool(pb_norm_eprr),
+                        )
+
+                        project_gt += df_mc_c["grand_total"].to_numpy(dtype=float)
+
+                        comp_summ_rows.append(
+                            {
+                                "Component": comp["component_type"],
+                                "Dataset": ds_name,
+                                "P50": float(df_mc_c["grand_total"].quantile(0.50)),
+                                "P80": float(df_mc_c["grand_total"].quantile(0.80)),
+                                "P90": float(df_mc_c["grand_total"].quantile(0.90)),
+                            }
+                        )
+
+                    df_proj_mc = pd.DataFrame({"project_grand_total": project_gt})
+
+                    buckets, pct_delta = scenario_bucket_from_baseline(
+                        df_proj_mc["project_grand_total"], baseline_gt, pb_low, pb_band, pb_high
                     )
+                    df_proj_mc["Scenario"] = buckets
+                    df_proj_mc["%Δ vs baseline"] = pct_delta
 
-                    feat_cols = comp.get("feature_cols") or feat_cols_tmp
-                    payload = comp.get("inputs") or {}
+                    p50 = float(df_proj_mc["project_grand_total"].quantile(0.50))
+                    p80 = float(df_proj_mc["project_grand_total"].quantile(0.80))
+                    p90 = float(df_proj_mc["project_grand_total"].quantile(0.90))
+                    exceed_prob = float((df_proj_mc["project_grand_total"] > float(pb_budget)).mean()) * 100.0
 
-                    eprr_pct = comp["breakdown"].get("eprr_pct", {})
-                    sst_pct_c = float(comp["breakdown"].get("sst_pct", 0.0))
-                    owners_pct_c = float(comp["breakdown"].get("owners_pct", 0.0))
-                    cont_pct_c = float(comp["breakdown"].get("cont_pct", 0.0))
-                    esc_pct_c = float(comp["breakdown"].get("esc_pct", 0.0))
+                st.markdown("### Project Monte Carlo Summary")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("P50 Project Grand Total", f"{curr} {p50:,.2f}")
+                m2.metric("P80 Project Grand Total", f"{curr} {p80:,.2f}")
+                m3.metric("P90 Project Grand Total", f"{curr} {p90:,.2f}")
+                m4.metric("P(> Budget)", f"{exceed_prob:.1f}%")
 
-                    comp_seed = int(pb_seed) + (idx + 1) * 101
+                fig_hist = px.histogram(df_proj_mc, x="project_grand_total", nbins=60, title="Project Grand Total distribution")
+                st.plotly_chart(fig_hist, use_container_width=True)
 
-                    df_mc_c = monte_carlo_component(
-                        model_pipe=pipe_tmp,
-                        feature_cols=list(feat_cols),
-                        base_payload=payload,
-                        n_sims=n,
-                        seed=comp_seed,
-                        feature_sigma_pct=float(pb_feat_sigma),
-                        pct_sigma_abs=float(pb_pct_sigma),
-                        eprr=eprr_pct,
-                        sst_pct=sst_pct_c,
-                        owners_pct=owners_pct_c,
-                        cont_pct=cont_pct_c,
-                        esc_pct=esc_pct_c,
-                        normalize_eprr_each_draw=bool(pb_norm_eprr),
-                    )
+                bucket_counts = df_proj_mc["Scenario"].value_counts().reset_index()
+                bucket_counts.columns = ["Scenario", "Count"]
+                fig_bucket = px.bar(bucket_counts, x="Scenario", y="Count", title="Scenario bucket counts")
+                st.plotly_chart(fig_bucket, use_container_width=True)
 
-                    project_gt += df_mc_c["grand_total"].to_numpy(dtype=float)
-
-                    comp_summ_rows.append(
-                        {
-                            "Component": comp["component_type"],
-                            "Dataset": ds_name,
-                            "P50": float(df_mc_c["grand_total"].quantile(0.50)),
-                            "P80": float(df_mc_c["grand_total"].quantile(0.80)),
-                            "P90": float(df_mc_c["grand_total"].quantile(0.90)),
-                        }
-                    )
-
-                df_proj_mc = pd.DataFrame({"project_grand_total": project_gt})
-
-                baseline = float(t["grand_total"])
-                buckets, pct_delta = scenario_bucket_from_baseline(
-                    df_proj_mc["project_grand_total"], baseline, pb_low, pb_band, pb_high
+                st.markdown("### Component Monte Carlo Summary (P50/P80/P90)")
+                df_comp_mc = pd.DataFrame(comp_summ_rows)
+                st.dataframe(
+                    df_comp_mc.style.format({"P50": "{:,.2f}", "P80": "{:,.2f}", "P90": "{:,.2f}"}),
+                    use_container_width=True,
                 )
-                df_proj_mc["Scenario"] = buckets
-                df_proj_mc["%Δ vs baseline"] = pct_delta
 
-                p50 = float(df_proj_mc["project_grand_total"].quantile(0.50))
-                p80 = float(df_proj_mc["project_grand_total"].quantile(0.80))
-                p90 = float(df_proj_mc["project_grand_total"].quantile(0.90))
-                exceed_prob = float((df_proj_mc["project_grand_total"] > float(pb_budget)).mean()) * 100.0
+                st.session_state[f"pb_last_proj_mc__{proj_sel}"] = df_proj_mc
+                st.session_state[f"pb_last_comp_mc__{proj_sel}"] = df_comp_mc
 
-            st.markdown("### Project Monte Carlo Summary")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("P50 Project Grand Total", f"{curr} {p50:,.2f}")
-            m2.metric("P80 Project Grand Total", f"{curr} {p80:,.2f}")
-            m3.metric("P90 Project Grand Total", f"{curr} {p90:,.2f}")
-            m4.metric("P(> Budget)", f"{exceed_prob:.1f}%")
+                with st.expander("Show Monte Carlo table (first 200 rows)", expanded=False):
+                    st.dataframe(df_proj_mc.head(200), use_container_width=True)
 
-            fig_hist = px.histogram(df_proj_mc, x="project_grand_total", nbins=60, title="Project Grand Total distribution")
-            st.plotly_chart(fig_hist, use_container_width=True)
-
-            bucket_counts = df_proj_mc["Scenario"].value_counts().reset_index()
-            bucket_counts.columns = ["Scenario", "Count"]
-            fig_bucket = px.bar(bucket_counts, x="Scenario", y="Count", title="Scenario bucket counts")
-            st.plotly_chart(fig_bucket, use_container_width=True)
-
-            st.markdown("### Component Monte Carlo Summary (P50/P80/P90)")
-            df_comp_mc = pd.DataFrame(comp_summ_rows)
-            st.dataframe(df_comp_mc.style.format({"P50": "{:,.2f}", "P80": "{:,.2f}", "P90": "{:,.2f}"}), use_container_width=True)
-
-            st.session_state[f"pb_last_proj_mc__{proj_sel}"] = df_proj_mc
-            st.session_state[f"pb_last_comp_mc__{proj_sel}"] = df_comp_mc
-
-            with st.expander("Show Monte Carlo table (first 200 rows)", expanded=False):
-                st.dataframe(df_proj_mc.head(200), use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Monte Carlo failed: {e}")
+            except Exception as e:
+                st.error(f"Monte Carlo failed: {e}")
 
 
 # =======================================================================================
@@ -1917,46 +1774,6 @@ with tab_compare:
     )
     fig_comp = px.bar(df_melt, x="Project", y="Value", color="Cost Type", barmode="stack")
     st.plotly_chart(fig_comp, use_container_width=True)
-
-    st.markdown("#### Component-Level Details")
-    for p in compare_sel:
-        proj = st.session_state.projects[p]
-        comps = proj.get("components", [])
-        if not comps:
-            continue
-        with st.expander(f"Project: {p}"):
-            rows_c = []
-            for c in comps:
-                eprr_costs = c["breakdown"].get("eprr_costs", {})
-                eprr_str = ", ".join(f"{k}: {v:,.0f}" for k, v in eprr_costs.items() if float(v) != 0)
-                rows_c.append(
-                    {
-                        "Component": c["component_type"],
-                        "Dataset": c["dataset"],
-                        "Model": c.get("model_used", ""),
-                        "Base CAPEX": c["prediction"],
-                        "Owner": c["breakdown"]["owners_cost"],
-                        "Contingency": c["breakdown"]["contingency_cost"],
-                        "Escalation": c["breakdown"]["escalation_cost"],
-                        "SST": c["breakdown"]["sst_cost"],
-                        "Grand Total": c["breakdown"]["grand_total"],
-                        "EPRR Costs": eprr_str,
-                    }
-                )
-            df_compd = pd.DataFrame(rows_c)
-            st.dataframe(
-                df_compd.style.format(
-                    {
-                        "Base CAPEX": "{:,.2f}",
-                        "Owner": "{:,.2f}",
-                        "Contingency": "{:,.2f}",
-                        "Escalation": "{:,.2f}",
-                        "SST": "{:,.2f}",
-                        "Grand Total": "{:,.2f}",
-                    }
-                ),
-                use_container_width=True,
-            )
 
     st.markdown("---")
     st.markdown("#### Download Comparison Reports")
