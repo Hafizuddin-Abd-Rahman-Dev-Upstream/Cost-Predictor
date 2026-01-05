@@ -58,7 +58,7 @@ from openpyxl.utils import get_column_letter
 # PAGE CONFIG
 # ---------------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="CAPEX AI RT2026",
+    page_title="CAPEX AI RT2020",
     page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -2024,4 +2024,5 @@ with tab_compare:
             file_name="CAPEX_Projects_Comparison.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
+
 
