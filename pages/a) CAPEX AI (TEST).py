@@ -1,16 +1,13 @@
 # ======================================================================================
-# CAPEX AI RT2026 — Refactored / Fixed Version (FULL CODE + Monte Carlo + Scenario Buckets)
-# Fixes applied:
-# 1) Grand Total includes SST (consistent across UI/charts/exports)
-# 2) Target column selection (default: last numeric column)
-# 3) Caching: manifest fetch, numeric prep, model training (st.cache_resource)
-# 4) Removed repeated KNN-imputation loops (default SimpleImputer median; optional KNN for viz)
-# 5) Prediction inputs use 1-row st.data_editor (no key explosion)
-# 6) Auth hardening (lowercase/strip, unified error)
-# 7) Centralized project totals + reduced duplication
-# 8) Trees don’t use scaler; linear/SVR use scaler
-# 9) Excel formatting improvements (freeze panes, widths, number formats)
-# 10) ✅ Monte Carlo simulation: uncertainty bands + scenario buckets + exceedance + tornado drivers
+# CAPEX AI RT2026 — Full Fixed Version (R2 stability + Target selection + Caching + Exports)
+# + ✅ Monte Carlo Simulation (added to Project Builder)
+# + ✅ Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
+#
+# Notes:
+# - Grand Total includes SST everywhere (UI + charts + exports + Monte Carlo)
+# - Target column is selectable per dataset (defaults to last numeric column)
+# - Model training is cached (st.cache_resource) and reused for prediction/project builder
+# - Project Builder Monte Carlo simulates each component and rolls up to project GT
 # ======================================================================================
 
 import io
@@ -328,7 +325,6 @@ def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
     if target_col and target_col in df.columns:
         return currency_from_header(str(target_col))
 
-    # Prefer LAST 'Total Cost' column
     cost_cols = []
     for c in df.columns:
         if is_junk_col(c):
@@ -339,7 +335,6 @@ def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
     if cost_cols:
         return currency_from_header(str(cost_cols[-1]))
 
-    # Fallback: last non-junk column
     for c in reversed(df.columns):
         if not is_junk_col(c):
             return currency_from_header(str(c))
@@ -355,7 +350,7 @@ def cost_breakdown(
     esc_pct: float,
 ):
     """
-    FIX: Grand Total includes SST (consistent everywhere).
+    Grand Total includes SST (consistent everywhere).
     """
     base_pred = float(base_pred)
 
@@ -410,6 +405,127 @@ def project_totals(proj):
         "sst": float(dfc["SST"].sum()),
         "grand_total": float(dfc["Grand Total"].sum()),
     }
+
+
+# ======================================================================================
+# ✅ MONTE CARLO HELPERS
+# ======================================================================================
+def _coerce_float(x, default=np.nan):
+    try:
+        if x is None:
+            return default
+        if isinstance(x, str) and x.strip() == "":
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+
+def monte_carlo_component(
+    model_pipe: Pipeline,
+    feature_cols: list[str],
+    base_payload: dict,
+    n_sims: int = 5000,
+    seed: int = 42,
+    feature_sigma_pct: float = 5.0,
+    pct_sigma_abs: float = 1.0,
+    eprr: dict | None = None,
+    sst_pct: float = 0.0,
+    owners_pct: float = 0.0,
+    cont_pct: float = 0.0,
+    esc_pct: float = 0.0,
+    normalize_eprr_each_draw: bool = False,
+) -> pd.DataFrame:
+    """
+    Simulates uncertainty:
+    - Features: multiplicative Gaussian noise, applied only to non-NaN inputs.
+    - Percentage fields (SST/Owner/Cont/Esc + EPRR parts): normal noise in ABS percentage points.
+    Returns per-sim costs and grand_total.
+    """
+    rng = np.random.default_rng(int(seed))
+    n = int(n_sims)
+
+    base_vec = np.array([_coerce_float(base_payload.get(c), np.nan) for c in feature_cols], dtype=float)
+    Xsim = np.tile(base_vec, (n, 1))
+
+    sigma = float(feature_sigma_pct) / 100.0
+    if sigma > 0:
+        noise = rng.normal(0.0, sigma, size=Xsim.shape)
+        mask = ~np.isnan(Xsim)
+        Xsim[mask] = Xsim[mask] * (1.0 + noise[mask])
+
+    df_sim = pd.DataFrame(Xsim, columns=feature_cols)
+    base_preds = model_pipe.predict(df_sim).astype(float)
+
+    p_sig = float(pct_sigma_abs)
+    sst_draw = np.clip(rng.normal(loc=float(sst_pct), scale=p_sig, size=n), 0.0, 100.0)
+    own_draw = np.clip(rng.normal(loc=float(owners_pct), scale=p_sig, size=n), 0.0, 100.0)
+    con_draw = np.clip(rng.normal(loc=float(cont_pct), scale=p_sig, size=n), 0.0, 100.0)
+    esc_draw = np.clip(rng.normal(loc=float(esc_pct), scale=p_sig, size=n), 0.0, 100.0)
+
+    eprr = eprr or {}
+    e_keys = list(eprr.keys())
+    e_mat = None
+    if e_keys:
+        e_mat = np.vstack(
+            [np.clip(rng.normal(loc=float(eprr.get(k, 0.0)), scale=p_sig, size=n), 0.0, 100.0) for k in e_keys]
+        ).T
+        if normalize_eprr_each_draw:
+            rs = e_mat.sum(axis=1)
+            rs[rs == 0] = 1.0
+            e_mat = (e_mat / rs[:, None]) * 100.0
+
+    owners_cost = np.round(base_preds * (own_draw / 100.0), 2)
+    sst_cost = np.round(base_preds * (sst_draw / 100.0), 2)
+    contingency_cost = np.round((base_preds + owners_cost) * (con_draw / 100.0), 2)
+    escalation_cost = np.round((base_preds + owners_cost) * (esc_draw / 100.0), 2)
+    grand_total = np.round(base_preds + owners_cost + sst_cost + contingency_cost + escalation_cost, 2)
+
+    out = pd.DataFrame(
+        {
+            "base_pred": base_preds,
+            "owners_cost": owners_cost,
+            "sst_cost": sst_cost,
+            "contingency_cost": contingency_cost,
+            "escalation_cost": escalation_cost,
+            "grand_total": grand_total,
+            "owners_pct": own_draw,
+            "sst_pct": sst_draw,
+            "cont_pct": con_draw,
+            "esc_pct": esc_draw,
+        }
+    )
+
+    if e_keys:
+        for j, k in enumerate(e_keys):
+            out[f"eprr_{k}_pct"] = e_mat[:, j]
+            out[f"eprr_{k}_cost"] = np.round(base_preds * (e_mat[:, j] / 100.0), 2)
+
+    return out
+
+
+def scenario_bucket_from_baseline(values: pd.Series, baseline: float, low_cut_pct: float, band_pct: float, high_cut_pct: float):
+    """
+    Bucket by % deviation from baseline:
+      - Low  : < -low_cut_pct
+      - Base : within ±band_pct
+      - High : > +high_cut_pct
+      - Unbucketed: between Base and High, or between Low and Base band (if you set big gaps)
+    """
+    baseline = float(baseline) if np.isfinite(baseline) and float(baseline) != 0 else float(values.median())
+    pct_delta = (values - baseline) / baseline
+
+    def label(v):
+        if v < (-low_cut_pct / 100.0):
+            return "Low"
+        if (-band_pct / 100.0) <= v <= (band_pct / 100.0):
+            return "Base"
+        if v > (high_cut_pct / 100.0):
+            return "High"
+        return "Unbucketed"
+
+    buckets = pct_delta.apply(label)
+    return buckets, pct_delta * 100.0
 
 
 # ---------------------------------------------------------------------------------------
@@ -486,6 +602,7 @@ def make_pipeline(model_name: str, random_state=42):
 
 
 def evaluate_models(X, y, test_size=0.2, random_state=42):
+    # IMPORTANT: fixed random_state => reproducible split => stable R2
     Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size, random_state=random_state)
 
     rows = []
@@ -512,7 +629,10 @@ def evaluate_models(X, y, test_size=0.2, random_state=42):
 
 @st.cache_resource(show_spinner=False)
 def train_best_model_cached(df: pd.DataFrame, target_col: str, test_size: float, random_state: int, dataset_key: str):
-    # dataset_key is included so Streamlit treats different datasets as different cache entries
+    """
+    Cached training for a specific dataset_key + target_col.
+    dataset_key is included so Streamlit treats different datasets as different cache entries.
+    """
     X, y = build_X_y(df, target_col)
     metrics = evaluate_models(X, y, test_size=test_size, random_state=random_state)
     best_name = metrics.get("best_model") or "RandomForest"
@@ -541,249 +661,6 @@ def knn_impute_numeric(df: pd.DataFrame, k: int = 5):
     num = prepare_numeric_df(df)
     arr = KNNImputer(n_neighbors=k).fit_transform(num)
     return pd.DataFrame(arr, columns=num.columns)
-
-
-# ======================================================================================
-# ✅ MONTE CARLO HELPERS
-# ======================================================================================
-def _fmt_money(v: float, curr: str) -> str:
-    try:
-        return f"{curr} {float(v):,.2f}".strip()
-    except Exception:
-        return str(v)
-
-def _fmt_pct(v: float) -> str:
-    try:
-        return f"{float(v):.2f}%"
-    except Exception:
-        return str(v)
-
-def percentile(x: np.ndarray, p: float) -> float:
-    return float(np.percentile(x, p))
-
-def sample_feature(series: pd.Series, center: float | None, mode: str, pct: float, rng: np.random.Generator):
-    s = pd.to_numeric(series, errors="coerce").dropna()
-    if s.empty:
-        return np.nan
-
-    if center is None or (isinstance(center, float) and np.isnan(center)):
-        return float(rng.choice(s.values))
-
-    center = float(center)
-    if mode == "Normal":
-        std = abs(center) * (pct / 100.0)
-        if std == 0:
-            std = float(s.std(ddof=0) or 0.0)
-        if std == 0:
-            return center
-        return float(rng.normal(loc=center, scale=std))
-    else:
-        half = abs(center) * (pct / 100.0)
-        if half == 0:
-            q1, q3 = float(s.quantile(0.25)), float(s.quantile(0.75))
-            half = (q3 - q1) / 2.0
-            if half == 0:
-                return center
-        return float(rng.uniform(center - half, center + half))
-
-def sample_percentage(center: float, mode: str, pct: float, rng: np.random.Generator) -> float:
-    center = float(center)
-    if mode == "Normal":
-        std = abs(center) * (pct / 100.0)
-        v = float(rng.normal(center, std))
-    else:
-        half = abs(center) * (pct / 100.0)
-        v = float(rng.uniform(center - half, center + half))
-    return float(np.clip(v, 0.0, 100.0))
-
-def run_monte_carlo(
-    df_dataset: pd.DataFrame,
-    feature_cols: list[str],
-    pipe: Pipeline,
-    base_payload: dict,
-    n: int,
-    seed: int,
-    feat_mode: str,
-    feat_pct: float,
-    vary_financial: bool,
-    fin_mode: str,
-    fin_pct: float,
-    eprr_base: dict,
-    sst_pct_base: float,
-    owners_pct_base: float,
-    cont_pct_base: float,
-    esc_pct_base: float,
-):
-    """
-    Returns a DataFrame of trials.
-    ✅ Includes sampled feature columns (needed for tornado + bucket feature summaries).
-    """
-    rng = np.random.default_rng(int(seed))
-    df_num = df_dataset.select_dtypes(include=[np.number]).copy()
-
-    feature_series = {c: df_num[c] for c in feature_cols if c in df_num.columns}
-
-    rows = []
-    for _ in range(int(n)):
-        sampled = {}
-
-        for c in feature_cols:
-            v = base_payload.get(c, np.nan)
-            if isinstance(v, str) and v.strip() == "":
-                v = np.nan
-            try:
-                v = float(v)
-            except Exception:
-                v = np.nan
-
-            sampled[c] = sample_feature(feature_series.get(c, pd.Series(dtype=float)), v, feat_mode, feat_pct, rng)
-
-        base_pred = float(pipe.predict(pd.DataFrame([sampled], columns=feature_cols))[0])
-
-        if vary_financial:
-            sst_pct = sample_percentage(sst_pct_base, fin_mode, fin_pct, rng)
-            owners_pct = sample_percentage(owners_pct_base, fin_mode, fin_pct, rng)
-            cont_pct = sample_percentage(cont_pct_base, fin_mode, fin_pct, rng)
-            esc_pct = sample_percentage(esc_pct_base, fin_mode, fin_pct, rng)
-            eprr_trial = {k: max(0.0, sample_percentage(float(v), fin_mode, fin_pct, rng)) for k, v in eprr_base.items()}
-            eprr_trial, _ = normalize_to_100(eprr_trial)
-        else:
-            sst_pct, owners_pct, cont_pct, esc_pct = sst_pct_base, owners_pct_base, cont_pct_base, esc_pct_base
-            eprr_trial = dict(eprr_base)
-
-        owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-            base_pred, eprr_trial, sst_pct, owners_pct, cont_pct, esc_pct
-        )
-
-        row = {
-            **sampled,
-            "Base Pred": base_pred,
-            "Grand Total": grand_total,
-            "Owners Cost": owners_cost,
-            "SST Cost": sst_cost,
-            "Contingency Cost": contingency_cost,
-            "Escalation Cost": escalation_cost,
-            "SST %": sst_pct,
-            "Owners %": owners_pct,
-            "Cont %": cont_pct,
-            "Esc %": esc_pct,
-            **{f"EPRR_{k}_Cost": v for k, v in eprr_costs.items()},
-        }
-        rows.append(row)
-
-    return pd.DataFrame(rows)
-
-def make_scenario_buckets(mc_df: pd.DataFrame, col: str = "Grand Total", scheme: str = "3"):
-    x = pd.to_numeric(mc_df[col], errors="coerce").dropna().to_numpy()
-    if x.size == 0:
-        out = mc_df.copy()
-        out["Scenario Bucket"] = np.nan
-        return out, pd.DataFrame(), {}
-
-    if scheme == "5":
-        p10 = percentile(x, 10); p30 = percentile(x, 30); p70 = percentile(x, 70); p90 = percentile(x, 90)
-        bins = [-np.inf, p10, p30, p70, p90, np.inf]
-        labels = ["Very Low (≤P10)", "Low (P10–P30)", "Base (P30–P70)", "High (P70–P90)", "Very High (≥P90)"]
-        cuts = {"P10": p10, "P30": p30, "P70": p70, "P90": p90}
-    else:
-        p10 = percentile(x, 10); p90 = percentile(x, 90)
-        bins = [-np.inf, p10, p90, np.inf]
-        labels = ["Low (≤P10)", "Base (P10–P90)", "High (≥P90)"]
-        cuts = {"P10": p10, "P90": p90}
-
-    out = mc_df.copy()
-    out["Scenario Bucket"] = pd.cut(out[col], bins=bins, labels=labels, include_lowest=True)
-
-    g = out.groupby("Scenario Bucket", observed=True)[col]
-    summary = pd.DataFrame(
-        {
-            "Scenario Bucket": labels,
-            "Probability": (out["Scenario Bucket"].value_counts(normalize=True).reindex(labels).fillna(0.0) * 100.0).round(2),
-            "Min": g.min().reindex(labels),
-            "Mean": g.mean().reindex(labels),
-            "Median": g.median().reindex(labels),
-            "Max": g.max().reindex(labels),
-        }
-    )
-    return out, summary, cuts
-
-def probability_exceedance(x: np.ndarray, threshold: float) -> float:
-    x = pd.to_numeric(pd.Series(x), errors="coerce").dropna().to_numpy()
-    if x.size == 0:
-        return float("nan")
-    return float((x > threshold).mean() * 100.0)
-
-def exceedance_by_bucket(bucketed_df: pd.DataFrame, threshold: float, col: str = "Grand Total"):
-    out = []
-    for b, sub in bucketed_df.groupby("Scenario Bucket", observed=True):
-        arr = pd.to_numeric(sub[col], errors="coerce").dropna().to_numpy()
-        out.append(
-            {"Scenario Bucket": b, "P(>Budget)%": float((arr > threshold).mean() * 100.0) if arr.size else np.nan, "n": int(arr.size)}
-        )
-    df = pd.DataFrame(out)
-    if not df.empty:
-        df["P(>Budget)%"] = df["P(>Budget)%"].round(2)
-    return df
-
-def tornado_drivers_from_samples(samples_df: pd.DataFrame, feature_cols: list[str], y_col: str = "Grand Total", top_k: int = 12):
-    present = [c for c in feature_cols if c in samples_df.columns]
-    if not present:
-        return pd.DataFrame()
-
-    y = pd.to_numeric(samples_df[y_col], errors="coerce")
-    rows = []
-    for c in present:
-        x = pd.to_numeric(samples_df[c], errors="coerce")
-        m = x.notna() & y.notna()
-        if m.sum() < 10:
-            continue
-        corr = float(np.corrcoef(x[m].to_numpy(), y[m].to_numpy())[0, 1])
-        if np.isnan(corr):
-            continue
-        rows.append({"Feature": c, "Corr": corr, "AbsCorr": abs(corr)})
-
-    return pd.DataFrame(rows).sort_values("AbsCorr", ascending=False).head(int(top_k))
-
-def bucket_feature_summary(bucketed_df: pd.DataFrame, feature_cols: list[str], col_bucket: str = "Scenario Bucket"):
-    present = [c for c in feature_cols if c in bucketed_df.columns]
-    if not present or col_bucket not in bucketed_df.columns:
-        return pd.DataFrame()
-
-    grp = bucketed_df.groupby(col_bucket, observed=True)[present]
-    means = grp.mean(numeric_only=True)
-    stds = grp.std(numeric_only=True, ddof=0)
-
-    out = []
-    for b in means.index:
-        for c in present:
-            out.append(
-                {
-                    "Scenario Bucket": b,
-                    "Feature": c,
-                    "Mean": float(means.loc[b, c]) if pd.notnull(means.loc[b, c]) else np.nan,
-                    "Std": float(stds.loc[b, c]) if pd.notnull(stds.loc[b, c]) else np.nan,
-                }
-            )
-    return pd.DataFrame(out)
-
-def auto_narrative(currency: str, p10: float, p50: float, p90: float, mean_gt: float, std_gt: float,
-                   budget: float | None, prob_exceed: float | None, bucket_summary: pd.DataFrame, tornado_df: pd.DataFrame):
-    lines = []
-    lines.append(
-        f"**Cost risk summary:** P10={_fmt_money(p10, currency)}, P50={_fmt_money(p50, currency)}, P90={_fmt_money(p90, currency)}."
-    )
-    lines.append(f"Mean={_fmt_money(mean_gt, currency)} with σ={_fmt_money(std_gt, currency)}.")
-    if budget is not None and prob_exceed is not None and not np.isnan(prob_exceed):
-        lines.append(f"**Budget check:** P(Grand Total > Budget={_fmt_money(budget, currency)}) = **{prob_exceed:.2f}%**.")
-    if tornado_df is not None and not tornado_df.empty:
-        top = tornado_df.head(3)["Feature"].tolist()
-        lines.append(f"**Top drivers:** {', '.join(top)}.")
-    if bucket_summary is not None and not bucket_summary.empty:
-        idx = bucket_summary["Probability"].astype(float).idxmax()
-        lines.append(
-            f"**Most likely scenario bucket:** {bucket_summary.loc[idx,'Scenario Bucket']} ({float(bucket_summary.loc[idx,'Probability']):.2f}% of trials)."
-        )
-    return "  \n".join(lines)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1103,13 +980,11 @@ with tab_data:
 
     project_name = st.text_input("Project Name", placeholder="e.g., Offshore Pipeline Replacement 2026")
 
-    # Train/load cached best model (no need to press "Run training" first)
     try:
-        default_test_size = 0.2
         pipe, metrics_auto, feat_cols, y_name, best_name = train_best_model_cached(
             df_pred,
             target_col_pred,
-            test_size=default_test_size,
+            test_size=0.2,
             random_state=42,
             dataset_key=ds_name_pred,
         )
@@ -1167,194 +1042,6 @@ with tab_data:
         except Exception as e:
             st.error(f"Prediction failed: {e}")
 
-    # ==================================================================================
-    # ✅ MONTE CARLO SIMULATION UI (Scenario buckets + exceedance + tornado + downloads)
-    # ==================================================================================
-    st.markdown("---")
-    st.markdown('<h4 style="margin:0;color:#000;">🎲 Monte Carlo Simulation</h4><p>Uncertainty bands • buckets • drivers • budget risk</p>', unsafe_allow_html=True)
-
-    mc_r1, mc_r2, mc_r3, mc_r4 = st.columns([1, 1, 1, 2])
-    with mc_r1:
-        mc_n = st.number_input("Trials", min_value=200, max_value=30000, value=3000, step=200, key=f"mc_trials__{ds_name_pred}")
-    with mc_r2:
-        mc_seed = st.number_input("Seed", min_value=0, max_value=999999, value=42, step=1, key=f"mc_seed__{ds_name_pred}")
-    with mc_r3:
-        feat_mode = st.selectbox("Feature sampling", ["Normal", "Uniform"], index=0, key=f"mc_feat_mode__{ds_name_pred}")
-    with mc_r4:
-        feat_pct = st.slider("Feature uncertainty ±%", 0.0, 60.0, 10.0, 1.0, key=f"mc_feat_pct__{ds_name_pred}")
-
-    mc_c1, mc_c2 = st.columns([1, 2])
-    with mc_c1:
-        vary_financial = st.checkbox("Also vary financial % + EPRR", value=False, key=f"mc_vary_fin__{ds_name_pred}")
-    with mc_c2:
-        fin_mode = st.selectbox("Financial sampling", ["Normal", "Uniform"], index=0, disabled=not vary_financial, key=f"mc_fin_mode__{ds_name_pred}")
-        fin_pct = st.slider("Financial uncertainty ±%", 0.0, 60.0, 5.0, 0.5, disabled=not vary_financial, key=f"mc_fin_pct__{ds_name_pred}")
-
-    bkt_c1, bkt_c2 = st.columns([1, 2])
-    with bkt_c1:
-        bucket_scheme_ui = st.selectbox("Scenario buckets", ["3 (P10/P90)", "5 (P10/P30/P70/P90)"], index=0, key=f"mc_bucket__{ds_name_pred}")
-    with bkt_c2:
-        st.caption("Buckets are percentile-based on Monte Carlo Grand Total.")
-
-    bud_c1, bud_c2 = st.columns([1, 2])
-    with bud_c1:
-        budget = st.number_input("Budget threshold (optional)", min_value=0.0, value=0.0, step=1000.0, key=f"mc_budget__{ds_name_pred}")
-    with bud_c2:
-        st.caption("If > 0, we compute probability Grand Total exceeds this budget (overall and per bucket).")
-
-    run_mc_btn = st.button("Run Monte Carlo", key=f"run_mc__{ds_name_pred}__{target_col_pred}")
-
-    if run_mc_btn:
-        with st.spinner("Running Monte Carlo..."):
-            mc_df = run_monte_carlo(
-                df_dataset=df_pred,
-                feature_cols=feat_cols,
-                pipe=pipe,
-                base_payload=payload,
-                n=int(mc_n),
-                seed=int(mc_seed),
-                feat_mode=feat_mode,
-                feat_pct=float(feat_pct),
-                vary_financial=bool(vary_financial),
-                fin_mode=fin_mode if vary_financial else "Normal",
-                fin_pct=float(fin_pct) if vary_financial else 0.0,
-                eprr_base=eprr,
-                sst_pct_base=sst_pct,
-                owners_pct_base=owners_pct,
-                cont_pct_base=cont_pct,
-                esc_pct_base=esc_pct,
-            )
-
-        gt_arr = pd.to_numeric(mc_df["Grand Total"], errors="coerce").dropna().to_numpy()
-        if gt_arr.size < 5:
-            st.error("Not enough valid Monte Carlo results to summarize. Check your inputs / dataset numeric columns.")
-        else:
-            p10, p50, p90 = percentile(gt_arr, 10), percentile(gt_arr, 50), percentile(gt_arr, 90)
-            mean_gt = float(np.mean(gt_arr))
-            std_gt = float(np.std(gt_arr, ddof=0))
-
-            s1, s2, s3, s4 = st.columns(4)
-            s1.metric("P10", _fmt_money(p10, currency_pred))
-            s2.metric("P50", _fmt_money(p50, currency_pred))
-            s3.metric("P90", _fmt_money(p90, currency_pred))
-            s4.metric("Mean ± Std", f"{_fmt_money(mean_gt, currency_pred)} ± {_fmt_money(std_gt, currency_pred)}")
-
-            st.plotly_chart(
-                px.histogram(mc_df, x="Grand Total", nbins=50, title="Grand Total Distribution"),
-                use_container_width=True,
-            )
-
-            sorted_gt = np.sort(gt_arr)
-            cdf = np.linspace(0, 1, len(sorted_gt))
-            fig_cdf = go.Figure()
-            fig_cdf.add_trace(go.Scatter(x=sorted_gt, y=cdf, mode="lines", name="CDF"))
-            fig_cdf.update_layout(title="Grand Total CDF", xaxis_title="Grand Total", yaxis_title="Probability")
-            st.plotly_chart(fig_cdf, use_container_width=True)
-
-            scheme = "5" if bucket_scheme_ui.startswith("5") else "3"
-            mc_bucketed, bucket_summary, cuts = make_scenario_buckets(mc_df, col="Grand Total", scheme=scheme)
-            cut_txt = ", ".join([f"{k}={_fmt_money(v, currency_pred)}" for k, v in cuts.items()])
-            st.caption(f"Cutpoints: {cut_txt if cut_txt else '—'}")
-
-            if not bucket_summary.empty:
-                disp = bucket_summary.copy()
-                for c in ["Min", "Mean", "Median", "Max"]:
-                    disp[c] = disp[c].apply(lambda v: _fmt_money(v, currency_pred) if pd.notnull(v) else "—")
-                disp["Probability"] = disp["Probability"].apply(_fmt_pct)
-                st.dataframe(disp, use_container_width=True)
-
-                fig_prob = px.bar(bucket_summary, x="Scenario Bucket", y="Probability", title="Scenario Probability (%)", text="Probability")
-                fig_prob.update_traces(texttemplate="%{text:.2f}%", textposition="outside")
-                st.plotly_chart(fig_prob, use_container_width=True)
-
-            st.markdown("#### Example scenario per bucket (closest to bucket median)")
-            examples = []
-            if "Scenario Bucket" in mc_bucketed.columns:
-                for b in mc_bucketed["Scenario Bucket"].dropna().unique():
-                    sub = mc_bucketed[mc_bucketed["Scenario Bucket"] == b]
-                    if sub.empty:
-                        continue
-                    med = float(pd.to_numeric(sub["Grand Total"], errors="coerce").median())
-                    sub2 = sub.assign(_dist=(pd.to_numeric(sub["Grand Total"], errors="coerce") - med).abs()).sort_values("_dist").head(1)
-                    examples.append(sub2.drop(columns=["_dist"]))
-            if examples:
-                ex_df = pd.concat(examples, ignore_index=True)
-                st.dataframe(ex_df, use_container_width=True, height=240)
-            else:
-                st.caption("No examples available.")
-
-            st.markdown("#### Budget exceedance")
-            budget_val = float(budget) if budget and float(budget) > 0 else None
-            prob_overall = probability_exceedance(gt_arr, budget_val) if budget_val is not None else None
-
-            if budget_val is not None:
-                st.metric("Overall P(>Budget)", f"{prob_overall:.2f}%")
-                by_bucket = exceedance_by_bucket(mc_bucketed, budget_val, col="Grand Total")
-                st.dataframe(by_bucket, use_container_width=True)
-                st.plotly_chart(
-                    px.bar(by_bucket, x="Scenario Bucket", y="P(>Budget)%", title="Exceedance Probability by Bucket"),
-                    use_container_width=True,
-                )
-            else:
-                st.caption("Set a budget > 0 to enable exceedance calculations.")
-
-            st.markdown("#### Tornado drivers (top features driving Grand Total)")
-            tornado_df = tornado_drivers_from_samples(mc_bucketed, feature_cols=feat_cols, y_col="Grand Total", top_k=12)
-            if tornado_df is not None and not tornado_df.empty:
-                st.dataframe(tornado_df, use_container_width=True)
-                fig_tor = px.bar(
-                    tornado_df.sort_values("AbsCorr", ascending=True),
-                    x="AbsCorr",
-                    y="Feature",
-                    orientation="h",
-                    title="Top drivers by |corr(feature, Grand Total)|",
-                )
-                st.plotly_chart(fig_tor, use_container_width=True)
-            else:
-                st.caption("Tornado unavailable (not enough valid samples or features).")
-
-            st.markdown("#### Bucket feature summaries (mean ± std)")
-            feat_sum = bucket_feature_summary(mc_bucketed, feature_cols=feat_cols, col_bucket="Scenario Bucket")
-            if not feat_sum.empty:
-                show_feats = tornado_df["Feature"].tolist()[:8] if (tornado_df is not None and not tornado_df.empty) else feat_cols[:8]
-                fs = feat_sum[feat_sum["Feature"].isin(show_feats)].copy()
-                fs["Mean"] = fs["Mean"].apply(lambda v: f"{v:,.4g}" if pd.notnull(v) else "—")
-                fs["Std"] = fs["Std"].apply(lambda v: f"{v:,.4g}" if pd.notnull(v) else "—")
-                st.dataframe(fs, use_container_width=True, height=350)
-            else:
-                st.caption("Feature summaries unavailable.")
-
-            st.markdown("#### Auto narrative")
-            st.markdown(
-                auto_narrative(
-                    currency=currency_pred,
-                    p10=p10,
-                    p50=p50,
-                    p90=p90,
-                    mean_gt=mean_gt,
-                    std_gt=std_gt,
-                    budget=budget_val,
-                    prob_exceed=prob_overall,
-                    bucket_summary=bucket_summary,
-                    tornado_df=tornado_df,
-                )
-            )
-
-            st.markdown("#### Download")
-            mc_xlsx = io.BytesIO()
-            mc_bucketed.to_excel(mc_xlsx, index=False, engine="openpyxl")
-            mc_xlsx.seek(0)
-            st.download_button(
-                "⬇️ Download Monte Carlo Results (Excel)",
-                data=mc_xlsx.getvalue(),
-                file_name=f"{ds_name_pred}_monte_carlo_{scheme}bucket.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-
-            with st.expander("Monte Carlo results (table)", expanded=False):
-                st.dataframe(mc_bucketed, use_container_width=True, height=380)
-
-    # ========================= BATCH (EXCEL) =================================
     st.markdown('<h4 style="margin:0;color:#000;">Batch (Excel)</h4>', unsafe_allow_html=True)
     xls = st.file_uploader("Upload Excel for batch prediction", type=["xlsx"], key="batch_xlsx")
     if xls:
@@ -1804,7 +1491,7 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
 
 
 # =======================================================================================
-# PROJECT BUILDER TAB
+# PROJECT BUILDER TAB (✅ with Monte Carlo)
 # =======================================================================================
 with tab_pb:
     st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
@@ -1845,7 +1532,7 @@ with tab_pb:
     )
 
     try:
-        pipe_c, metrics_c, feat_cols_c, y_name_c, best_name_c = train_best_model_cached(
+        pipe_c, _, feat_cols_c, y_name_c, best_name_c = train_best_model_cached(
             df_comp,
             target_col_comp,
             test_size=0.2,
@@ -1901,6 +1588,7 @@ with tab_pb:
                 "dataset": dataset_for_comp,
                 "model_used": best_name_c,
                 "inputs": {k: comp_payload.get(k, np.nan) for k in feat_cols_c},
+                "feature_cols": list(feat_cols_c),  # ✅ for Monte Carlo reuse
                 "prediction": base_pred,
                 "breakdown": {
                     "eprr_costs": eprr_costs,
@@ -1911,6 +1599,11 @@ with tab_pb:
                     "escalation_cost": escalation_cost,
                     "grand_total": grand_total,
                     "target_col": y_name_c,
+                    # ✅ store pct inputs for Monte Carlo
+                    "sst_pct": float(sst_pb),
+                    "owners_pct": float(owners_pb),
+                    "cont_pct": float(cont_pb),
+                    "esc_pct": float(esc_pb),
                 },
             }
 
@@ -2027,6 +1720,141 @@ with tab_pb:
             st.rerun()
         except Exception as e:
             st.error(f"Failed to import project JSON: {e}")
+
+    # -----------------------------------------------------------------------------------
+    # ✅ MONTE CARLO (Project Builder)
+    # -----------------------------------------------------------------------------------
+    st.markdown("---")
+    st.markdown("## 🎲 Monte Carlo (Project Builder)")
+    st.caption("Simulate uncertainty per component and roll-up to project Grand Total distribution.")
+
+    mcA, mcB, mcC = st.columns(3)
+    with mcA:
+        pb_n_sims = st.number_input("Simulations", 500, 50000, 5000, 500, key=f"pb_mc_n_{proj_sel}")
+        pb_seed = st.number_input("Random seed", 0, 999999, 42, 1, key=f"pb_mc_seed_{proj_sel}")
+    with mcB:
+        pb_feat_sigma = st.slider("Feature uncertainty (±% stdev)", 0.0, 30.0, 5.0, 0.5, key=f"pb_mc_feat_{proj_sel}")
+        pb_pct_sigma = st.slider("Percent uncertainty (± abs stdev)", 0.0, 10.0, 1.0, 0.1, key=f"pb_mc_pct_{proj_sel}")
+    with mcC:
+        pb_norm_eprr = st.checkbox("Normalize EPRR to 100% each simulation", False, key=f"pb_mc_norm_{proj_sel}")
+        pb_budget = st.number_input(
+            "Budget threshold (Project Grand Total)",
+            min_value=0.0,
+            value=float(t["grand_total"]),
+            step=1000.0,
+            key=f"pb_mc_budget_{proj_sel}",
+        )
+
+    st.markdown("### Scenario buckets (Project Grand Total vs baseline)")
+    sb1, sb2, sb3 = st.columns(3)
+    with sb1:
+        pb_low = st.slider("Low < baseline by (%)", 0, 50, 10, 1, key=f"pb_mc_low_{proj_sel}")
+    with sb2:
+        pb_band = st.slider("Base band ± (%)", 1, 50, 10, 1, key=f"pb_mc_band_{proj_sel}")
+    with sb3:
+        pb_high = st.slider("High > baseline by (%)", 0, 50, 10, 1, key=f"pb_mc_high_{proj_sel}")
+
+    if st.button("Run Project Monte Carlo", type="primary", key=f"pb_mc_run_{proj_sel}"):
+        try:
+            with st.spinner("Running Monte Carlo for each component and rolling up..."):
+                n = int(pb_n_sims)
+                project_gt = np.zeros(n, dtype=float)
+                comp_summ_rows = []
+
+                for idx, comp in enumerate(comps):
+                    ds_name = comp["dataset"]
+                    df_ds = st.session_state.datasets.get(ds_name)
+                    if df_ds is None:
+                        raise ValueError(f"Dataset not found in session: {ds_name}")
+
+                    target_col = comp["breakdown"].get("target_col")
+                    if not target_col:
+                        raise ValueError(f"Component '{comp['component_type']}' missing breakdown.target_col")
+
+                    pipe_tmp, _, feat_cols_tmp, _, _ = train_best_model_cached(
+                        df_ds, target_col, test_size=0.2, random_state=42, dataset_key=ds_name
+                    )
+
+                    feat_cols = comp.get("feature_cols") or feat_cols_tmp
+                    payload = comp.get("inputs") or {}
+
+                    eprr_pct = comp["breakdown"].get("eprr_pct", {})
+                    sst_pct_c = float(comp["breakdown"].get("sst_pct", 0.0))
+                    owners_pct_c = float(comp["breakdown"].get("owners_pct", 0.0))
+                    cont_pct_c = float(comp["breakdown"].get("cont_pct", 0.0))
+                    esc_pct_c = float(comp["breakdown"].get("esc_pct", 0.0))
+
+                    comp_seed = int(pb_seed) + (idx + 1) * 101
+
+                    df_mc_c = monte_carlo_component(
+                        model_pipe=pipe_tmp,
+                        feature_cols=list(feat_cols),
+                        base_payload=payload,
+                        n_sims=n,
+                        seed=comp_seed,
+                        feature_sigma_pct=float(pb_feat_sigma),
+                        pct_sigma_abs=float(pb_pct_sigma),
+                        eprr=eprr_pct,
+                        sst_pct=sst_pct_c,
+                        owners_pct=owners_pct_c,
+                        cont_pct=cont_pct_c,
+                        esc_pct=esc_pct_c,
+                        normalize_eprr_each_draw=bool(pb_norm_eprr),
+                    )
+
+                    project_gt += df_mc_c["grand_total"].to_numpy(dtype=float)
+
+                    comp_summ_rows.append(
+                        {
+                            "Component": comp["component_type"],
+                            "Dataset": ds_name,
+                            "P50": float(df_mc_c["grand_total"].quantile(0.50)),
+                            "P80": float(df_mc_c["grand_total"].quantile(0.80)),
+                            "P90": float(df_mc_c["grand_total"].quantile(0.90)),
+                        }
+                    )
+
+                df_proj_mc = pd.DataFrame({"project_grand_total": project_gt})
+
+                baseline = float(t["grand_total"])
+                buckets, pct_delta = scenario_bucket_from_baseline(
+                    df_proj_mc["project_grand_total"], baseline, pb_low, pb_band, pb_high
+                )
+                df_proj_mc["Scenario"] = buckets
+                df_proj_mc["%Δ vs baseline"] = pct_delta
+
+                p50 = float(df_proj_mc["project_grand_total"].quantile(0.50))
+                p80 = float(df_proj_mc["project_grand_total"].quantile(0.80))
+                p90 = float(df_proj_mc["project_grand_total"].quantile(0.90))
+                exceed_prob = float((df_proj_mc["project_grand_total"] > float(pb_budget)).mean()) * 100.0
+
+            st.markdown("### Project Monte Carlo Summary")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("P50 Project Grand Total", f"{curr} {p50:,.2f}")
+            m2.metric("P80 Project Grand Total", f"{curr} {p80:,.2f}")
+            m3.metric("P90 Project Grand Total", f"{curr} {p90:,.2f}")
+            m4.metric("P(> Budget)", f"{exceed_prob:.1f}%")
+
+            fig_hist = px.histogram(df_proj_mc, x="project_grand_total", nbins=60, title="Project Grand Total distribution")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+            bucket_counts = df_proj_mc["Scenario"].value_counts().reset_index()
+            bucket_counts.columns = ["Scenario", "Count"]
+            fig_bucket = px.bar(bucket_counts, x="Scenario", y="Count", title="Scenario bucket counts")
+            st.plotly_chart(fig_bucket, use_container_width=True)
+
+            st.markdown("### Component Monte Carlo Summary (P50/P80/P90)")
+            df_comp_mc = pd.DataFrame(comp_summ_rows)
+            st.dataframe(df_comp_mc.style.format({"P50": "{:,.2f}", "P80": "{:,.2f}", "P90": "{:,.2f}"}), use_container_width=True)
+
+            st.session_state[f"pb_last_proj_mc__{proj_sel}"] = df_proj_mc
+            st.session_state[f"pb_last_comp_mc__{proj_sel}"] = df_comp_mc
+
+            with st.expander("Show Monte Carlo table (first 200 rows)", expanded=False):
+                st.dataframe(df_proj_mc.head(200), use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Monte Carlo failed: {e}")
 
 
 # =======================================================================================
