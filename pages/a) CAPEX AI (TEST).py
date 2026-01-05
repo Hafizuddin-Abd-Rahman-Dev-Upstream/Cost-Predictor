@@ -1,12 +1,8 @@
 # ======================================================================================
-# CAPEX AI RT2026 — Full Fixed Version (R2 stability + Target selection + Caching + Exports)
-# + ✅ Monte Carlo Simulation (added to Project Builder)
-# + ✅ Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
+# CAPEX AI RT2026 — (R2 stability + Target selection + Caching + Exports)
+# +  Monte Carlo Simulation (added to Project Builder)
+# +  Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
 #
-# FIX (IMPORTANT):
-# - Monte Carlo was "not visible" because st.stop() was stopping the render when no components exist.
-#   ✅ Removed that st.stop() and made Project Builder render Monte Carlo section always.
-# - Also ensured project totals (t / baseline_gt) are always defined before Monte Carlo UI.
 #
 # Notes:
 # - Grand Total includes SST everywhere (UI + charts + exports + Monte Carlo)
@@ -1799,3 +1795,4 @@ with tab_compare:
             file_name="CAPEX_Projects_Comparison.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
+
