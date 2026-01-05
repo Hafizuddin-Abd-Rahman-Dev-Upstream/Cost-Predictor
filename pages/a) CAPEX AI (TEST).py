@@ -1,8 +1,8 @@
 # ======================================================================================
 # CAPEX AI RT2026 — Full Fixed Version
-# ✅ R2 stability + Target selection + Caching + Exports
-# ✅ Monte Carlo Simulation (NEW TOP-LEVEL TAB: 🎲 Monte Carlo)
-# ✅ Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
+#  R2 stability + Target selection + Caching + Exports
+#  Monte Carlo Simulation (NEW TOP-LEVEL TAB: 🎲 Monte Carlo)
+#  Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
 #
 # Notes:
 # - Grand Total includes SST everywhere (UI + charts + exports + Monte Carlo)
@@ -2024,3 +2024,4 @@ with tab_compare:
             file_name="CAPEX_Projects_Comparison.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
+
