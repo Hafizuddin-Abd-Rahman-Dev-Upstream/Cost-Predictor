@@ -1,8 +1,8 @@
 # ======================================================================================
-# CAPEX AI RT2026 — Refactored / Fixed Version
-# Fixes applied:
+# CAPEX AI RT2026 — Refactored / Fixed Version (Option A: ALWAYS last numeric target)
+# Fixes applied (including your request):
 # 1) Grand Total includes SST (consistent across UI/charts/exports)
-# 2) Target column selection (default: last numeric column)
+# 2) Target column selection: ALWAYS last numeric column (no UI selectbox)
 # 3) Caching: manifest fetch, numeric prep, model training (st.cache_resource)
 # 4) Removed repeated KNN-imputation loops (default SimpleImputer median; optional KNN for viz)
 # 5) Prediction inputs use 1-row st.data_editor (no key explosion)
@@ -345,6 +345,14 @@ def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
     return ""
 
 
+def get_last_numeric_target(df: pd.DataFrame) -> str:
+    """Option A: ALWAYS last numeric column (features + target need >=2 numeric columns)."""
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if len(num_cols) < 2:
+        raise ValueError("Need at least 2 numeric columns (features + target).")
+    return num_cols[-1]
+
+
 def cost_breakdown(
     base_pred: float,
     eprr: dict,
@@ -664,29 +672,17 @@ with tab_data:
     st.divider()
 
     # -------------------------
-    # Active dataset preview + target selection
+    # Active dataset preview + target selection (AUTO: last numeric)
     # -------------------------
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()))
         df_active = st.session_state.datasets[ds_name_data]
 
-        # numeric column list for target selection
-        num_cols = df_active.select_dtypes(include=[np.number]).columns.tolist()
-        if len(num_cols) < 2:
-            st.warning("This dataset has < 2 numeric columns. Model requires numeric features + numeric target.")
+        try:
+            target_col_active = get_last_numeric_target(df_active)  # ALWAYS last numeric
+        except Exception as e:
+            st.warning(str(e))
             st.stop()
-
-        # per-dataset target selection stored
-        target_key = f"target_col__{ds_name_data}"
-        if target_key not in st.session_state:
-            st.session_state[target_key] = num_cols[-1]
-
-        target_col_active = st.selectbox(
-            "Target (Cost) column",
-            options=num_cols,
-            index=num_cols.index(st.session_state[target_key]) if st.session_state[target_key] in num_cols else len(num_cols) - 1,
-            key=target_key,
-        )
 
         currency_active = get_currency_symbol(df_active, target_col_active)
 
@@ -698,7 +694,7 @@ with tab_data:
         with colC:
             st.metric("Currency", f"{currency_active or '—'}")
         with colD2:
-            st.caption("Tip: Target defaults to last numeric column. Change it if your CSV includes extra numeric fields.")
+            st.caption(f"Target (auto: last numeric): **{target_col_active}**")
 
         with st.expander("Preview (first 10 rows)", expanded=False):
             st.dataframe(df_active.head(10), use_container_width=True)
@@ -712,14 +708,21 @@ with tab_data:
 
     ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
     df_model = st.session_state.datasets[ds_name_model]
-    target_col_model = st.session_state.get(f"target_col__{ds_name_model}")
+    try:
+        target_col_model = get_last_numeric_target(df_model)  # ALWAYS last numeric
+    except Exception as e:
+        st.error(f"Target detection failed: {e}")
+        st.stop()
 
     m1, m2 = st.columns([1, 3])
     with m1:
         test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05)
         run_train = st.button("Run training")
     with m2:
-        st.caption("Automatic best-model selection over 6 regressors (median imputation; scaling for linear/SVR only).")
+        st.caption(
+            f"Auto target: **{target_col_model}** | Best-model selection over 6 regressors "
+            "(median imputation; scaling for linear/SVR only)."
+        )
 
     if run_train:
         try:
@@ -761,8 +764,14 @@ with tab_data:
 
     ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
     df_viz = st.session_state.datasets[ds_name_viz]
-    target_col_viz = st.session_state.get(f"target_col__{ds_name_viz}")
+    try:
+        target_col_viz = get_last_numeric_target(df_viz)  # ALWAYS last numeric
+    except Exception as e:
+        st.error(f"Target detection failed: {e}")
+        st.stop()
+
     currency_viz = get_currency_symbol(df_viz, target_col_viz)
+    st.caption(f"Target (auto: last numeric): **{target_col_viz}**")
 
     # Optional: KNN imputation for viz only (cached)
     with st.expander("Visualization settings", expanded=False):
@@ -832,8 +841,14 @@ with tab_data:
 
     ds_name_pred = st.selectbox("Dataset for prediction", list(st.session_state.datasets.keys()), key="ds_pred")
     df_pred = st.session_state.datasets[ds_name_pred]
-    target_col_pred = st.session_state.get(f"target_col__{ds_name_pred}")
+    try:
+        target_col_pred = get_last_numeric_target(df_pred)  # ALWAYS last numeric
+    except Exception as e:
+        st.error(f"Target detection failed: {e}")
+        st.stop()
+
     currency_pred = get_currency_symbol(df_pred, target_col_pred)
+    st.caption(f"Target (auto: last numeric): **{target_col_pred}**")
 
     st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
     c1, c2 = st.columns([1, 1])
@@ -1386,7 +1401,10 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
 # PROJECT BUILDER TAB
 # =======================================================================================
 with tab_pb:
-    st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
+    st.markdown(
+        '<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>',
+        unsafe_allow_html=True,
+    )
 
     if not st.session_state.datasets:
         st.info("No dataset. Go to **Data** tab to upload or load.")
@@ -1413,8 +1431,14 @@ with tab_pb:
     dataset_for_comp = st.selectbox("Dataset for this component", ds_names, key="pb_dataset_for_component")
     df_comp = st.session_state.datasets[dataset_for_comp]
 
-    target_col_comp = st.session_state.get(f"target_col__{dataset_for_comp}")
+    try:
+        target_col_comp = get_last_numeric_target(df_comp)  # ALWAYS last numeric
+    except Exception as e:
+        st.error(f"Target detection failed: {e}")
+        st.stop()
+
     curr_ds = get_currency_symbol(df_comp, target_col_comp)
+    st.caption(f"Target (auto: last numeric): **{target_col_comp}**")
 
     default_label = st.session_state.component_labels.get(dataset_for_comp, "")
     component_type = st.text_input(
