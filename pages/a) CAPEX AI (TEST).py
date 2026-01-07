@@ -1,15 +1,18 @@
 # ======================================================================================
-# CAPEX AI RT2026 — Refactored / Fixed Version (Option A: ALWAYS last numeric target)
-# Fixes applied (including your request):
-# 1) Grand Total includes SST (consistent across UI/charts/exports)
-# 2) Target column selection: ALWAYS last numeric column (no UI selectbox)
-# 3) Caching: manifest fetch, numeric prep, model training (st.cache_resource)
-# 4) Removed repeated KNN-imputation loops (default SimpleImputer median; optional KNN for viz)
-# 5) Prediction inputs use 1-row st.data_editor (no key explosion)
-# 6) Auth hardening (lowercase/strip, unified error)
-# 7) Centralized project totals + reduced duplication
-# 8) Trees don’t use scaler; linear/SVR use scaler
-# 9) Excel formatting improvements (freeze panes, widths, number formats)
+# CAPEX AI RT2026 — Full Fixed Version
+#  R2 stability + Target selection + Caching + Exports
+#  Monte Carlo Simulation (NEW TOP-LEVEL TAB: 🎲 Monte Carlo)
+#  Scenario Buckets (Low/Base/High) for Monte Carlo roll-up
+#
+# Notes:
+# - Grand Total includes SST everywhere (UI + charts + exports + Monte Carlo)
+# - Target column selectable per dataset (defaults to last numeric column)
+# - Model training is cached (st.cache_resource) and reused for prediction/project builder/MC
+# - Monte Carlo simulates each component and rolls up to project Grand Total distribution
+#
+# Streamlit Cloud note:
+# - Make sure requirements.txt includes: streamlit, pandas, numpy, scikit-learn, scipy, plotly,
+#   matplotlib, python-pptx, openpyxl, requests
 # ======================================================================================
 
 import io
@@ -51,12 +54,11 @@ from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
 
-
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
 # ---------------------------------------------------------------------------------------
 st.set_page_config(
-    page_title="CAPEX AI RT2026",
+    page_title="CAPEX AI RT2020",
     page_icon="💠",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -317,17 +319,12 @@ def currency_from_header(header: str) -> str:
 
 
 def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
-    """
-    Detect currency from target cost column header (preferred).
-    Fallback: last 'Total Cost' column, then last non-junk.
-    """
     if df is None or df.empty:
         return ""
 
     if target_col and target_col in df.columns:
         return currency_from_header(str(target_col))
 
-    # Prefer LAST 'Total Cost' column
     cost_cols = []
     for c in df.columns:
         if is_junk_col(c):
@@ -338,19 +335,10 @@ def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
     if cost_cols:
         return currency_from_header(str(cost_cols[-1]))
 
-    # Fallback: last non-junk column
     for c in reversed(df.columns):
         if not is_junk_col(c):
             return currency_from_header(str(c))
     return ""
-
-
-def get_last_numeric_target(df: pd.DataFrame) -> str:
-    """Option A: ALWAYS last numeric column (features + target need >=2 numeric columns)."""
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if len(num_cols) < 2:
-        raise ValueError("Need at least 2 numeric columns (features + target).")
-    return num_cols[-1]
 
 
 def cost_breakdown(
@@ -361,9 +349,6 @@ def cost_breakdown(
     cont_pct: float,
     esc_pct: float,
 ):
-    """
-    FIX: Grand Total includes SST (consistent everywhere).
-    """
     base_pred = float(base_pred)
 
     owners_cost = round(base_pred * (owners_pct / 100.0), 2)
@@ -401,14 +386,7 @@ def project_components_df(proj):
 def project_totals(proj):
     dfc = project_components_df(proj)
     if dfc.empty:
-        return {
-            "capex_sum": 0.0,
-            "owners": 0.0,
-            "cont": 0.0,
-            "esc": 0.0,
-            "sst": 0.0,
-            "grand_total": 0.0,
-        }
+        return {"capex_sum": 0.0, "owners": 0.0, "cont": 0.0, "esc": 0.0, "sst": 0.0, "grand_total": 0.0}
     return {
         "capex_sum": float(dfc["Base CAPEX"].sum()),
         "owners": float(dfc["Owner's Cost"].sum()),
@@ -417,6 +395,114 @@ def project_totals(proj):
         "sst": float(dfc["SST"].sum()),
         "grand_total": float(dfc["Grand Total"].sum()),
     }
+
+
+# ======================================================================================
+# ✅ MONTE CARLO HELPERS
+# ======================================================================================
+def _coerce_float(x, default=np.nan):
+    try:
+        if x is None:
+            return default
+        if isinstance(x, str) and x.strip() == "":
+            return default
+        return float(x)
+    except Exception:
+        return default
+
+
+def monte_carlo_component(
+    model_pipe: Pipeline,
+    feature_cols: list[str],
+    base_payload: dict,
+    n_sims: int = 5000,
+    seed: int = 42,
+    feature_sigma_pct: float = 5.0,
+    pct_sigma_abs: float = 1.0,
+    eprr: dict | None = None,
+    sst_pct: float = 0.0,
+    owners_pct: float = 0.0,
+    cont_pct: float = 0.0,
+    esc_pct: float = 0.0,
+    normalize_eprr_each_draw: bool = False,
+) -> pd.DataFrame:
+    rng = np.random.default_rng(int(seed))
+    n = int(n_sims)
+
+    base_vec = np.array([_coerce_float(base_payload.get(c), np.nan) for c in feature_cols], dtype=float)
+    Xsim = np.tile(base_vec, (n, 1))
+
+    sigma = float(feature_sigma_pct) / 100.0
+    if sigma > 0:
+        noise = rng.normal(0.0, sigma, size=Xsim.shape)
+        mask = ~np.isnan(Xsim)
+        Xsim[mask] = Xsim[mask] * (1.0 + noise[mask])
+
+    df_sim = pd.DataFrame(Xsim, columns=feature_cols)
+    base_preds = model_pipe.predict(df_sim).astype(float)
+
+    p_sig = float(pct_sigma_abs)
+    sst_draw = np.clip(rng.normal(loc=float(sst_pct), scale=p_sig, size=n), 0.0, 100.0)
+    own_draw = np.clip(rng.normal(loc=float(owners_pct), scale=p_sig, size=n), 0.0, 100.0)
+    con_draw = np.clip(rng.normal(loc=float(cont_pct), scale=p_sig, size=n), 0.0, 100.0)
+    esc_draw = np.clip(rng.normal(loc=float(esc_pct), scale=p_sig, size=n), 0.0, 100.0)
+
+    eprr = eprr or {}
+    e_keys = list(eprr.keys())
+    e_mat = None
+    if e_keys:
+        e_mat = np.vstack(
+            [np.clip(rng.normal(loc=float(eprr.get(k, 0.0)), scale=p_sig, size=n), 0.0, 100.0) for k in e_keys]
+        ).T
+        if normalize_eprr_each_draw:
+            rs = e_mat.sum(axis=1)
+            rs[rs == 0] = 1.0
+            e_mat = (e_mat / rs[:, None]) * 100.0
+
+    owners_cost = np.round(base_preds * (own_draw / 100.0), 2)
+    sst_cost = np.round(base_preds * (sst_draw / 100.0), 2)
+    contingency_cost = np.round((base_preds + owners_cost) * (con_draw / 100.0), 2)
+    escalation_cost = np.round((base_preds + owners_cost) * (esc_draw / 100.0), 2)
+    grand_total = np.round(base_preds + owners_cost + sst_cost + contingency_cost + escalation_cost, 2)
+
+    out = pd.DataFrame(
+        {
+            "base_pred": base_preds,
+            "owners_cost": owners_cost,
+            "sst_cost": sst_cost,
+            "contingency_cost": contingency_cost,
+            "escalation_cost": escalation_cost,
+            "grand_total": grand_total,
+            "owners_pct": own_draw,
+            "sst_pct": sst_draw,
+            "cont_pct": con_draw,
+            "esc_pct": esc_draw,
+        }
+    )
+
+    if e_keys:
+        for j, k in enumerate(e_keys):
+            out[f"eprr_{k}_pct"] = e_mat[:, j]
+            out[f"eprr_{k}_cost"] = np.round(base_preds * (e_mat[:, j] / 100.0), 2)
+
+    return out
+
+
+def scenario_bucket_from_baseline(values: pd.Series, baseline: float, low_cut_pct: float, band_pct: float, high_cut_pct: float):
+    baseline = float(baseline) if np.isfinite(baseline) and float(baseline) != 0 else float(values.median())
+    pct_delta = (values - baseline) / baseline
+
+    def label(v):
+        if v < (-low_cut_pct / 100.0):
+            return "Low"
+        if (-band_pct / 100.0) <= v <= (band_pct / 100.0):
+            return "Base"
+        if v > (high_cut_pct / 100.0):
+            return "High"
+        return "Unbucketed"
+
+    buckets = pct_delta.apply(label)
+    return buckets, pct_delta * 100.0
 
 
 # ---------------------------------------------------------------------------------------
@@ -436,7 +522,6 @@ MODEL_CANDIDATES = {
     "DecisionTree": lambda rs=42: DecisionTreeRegressor(random_state=rs),
 }
 
-TREE_MODELS = {"RandomForest", "GradientBoosting", "DecisionTree"}
 SCALE_MODELS = {"Ridge", "Lasso", "SVR"}  # use scaler
 
 
@@ -520,7 +605,6 @@ def evaluate_models(X, y, test_size=0.2, random_state=42):
 
 @st.cache_resource(show_spinner=False)
 def train_best_model_cached(df: pd.DataFrame, target_col: str, test_size: float, random_state: int, dataset_key: str):
-    # dataset_key is included so Streamlit treats different datasets as different cache entries
     X, y = build_X_y(df, target_col)
     metrics = evaluate_models(X, y, test_size=test_size, random_state=random_state)
     best_name = metrics.get("best_model") or "RandomForest"
@@ -571,10 +655,11 @@ for col, label in zip(nav_cols, nav_labels):
         )
 
 # ---------------------------------------------------------------------------------------
-# TOP-LEVEL TABS
+# TOP-LEVEL TABS  ✅ MC IS ITS OWN TAB
 # ---------------------------------------------------------------------------------------
-tab_data, tab_pb, tab_compare = st.tabs(["📊 Data", "🏗️ Project Builder", "🔀 Compare Projects"])
-
+tab_data, tab_pb, tab_mc, tab_compare = st.tabs(
+    ["📊 Data", "🏗️ Project Builder", "🎲 Monte Carlo", "🔀 Compare Projects"]
+)
 
 # =======================================================================================
 # DATA TAB
@@ -672,17 +757,29 @@ with tab_data:
     st.divider()
 
     # -------------------------
-    # Active dataset preview + target selection (AUTO: last numeric)
+    # Active dataset preview + target selection
     # -------------------------
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()))
         df_active = st.session_state.datasets[ds_name_data]
 
-        try:
-            target_col_active = get_last_numeric_target(df_active)  # ALWAYS last numeric
-        except Exception as e:
-            st.warning(str(e))
+        num_cols = df_active.select_dtypes(include=[np.number]).columns.tolist()
+        if len(num_cols) < 2:
+            st.warning("This dataset has < 2 numeric columns. Model requires numeric features + numeric target.")
             st.stop()
+
+        target_key = f"target_col__{ds_name_data}"
+        if target_key not in st.session_state:
+            st.session_state[target_key] = num_cols[-1]
+
+        target_col_active = st.selectbox(
+            "Target (Cost) column",
+            options=num_cols,
+            index=num_cols.index(st.session_state[target_key])
+            if st.session_state[target_key] in num_cols
+            else len(num_cols) - 1,
+            key=target_key,
+        )
 
         currency_active = get_currency_symbol(df_active, target_col_active)
 
@@ -694,7 +791,7 @@ with tab_data:
         with colC:
             st.metric("Currency", f"{currency_active or '—'}")
         with colD2:
-            st.caption(f"Target (auto: last numeric): **{target_col_active}**")
+            st.caption("Tip: Target defaults to last numeric column. Change it if your CSV includes extra numeric fields.")
 
         with st.expander("Preview (first 10 rows)", expanded=False):
             st.dataframe(df_active.head(10), use_container_width=True)
@@ -708,21 +805,14 @@ with tab_data:
 
     ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
     df_model = st.session_state.datasets[ds_name_model]
-    try:
-        target_col_model = get_last_numeric_target(df_model)  # ALWAYS last numeric
-    except Exception as e:
-        st.error(f"Target detection failed: {e}")
-        st.stop()
+    target_col_model = st.session_state.get(f"target_col__{ds_name_model}")
 
     m1, m2 = st.columns([1, 3])
     with m1:
         test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05)
         run_train = st.button("Run training")
     with m2:
-        st.caption(
-            f"Auto target: **{target_col_model}** | Best-model selection over 6 regressors "
-            "(median imputation; scaling for linear/SVR only)."
-        )
+        st.caption("Automatic best-model selection over 6 regressors (median imputation; scaling for linear/SVR only).")
 
     if run_train:
         try:
@@ -764,16 +854,8 @@ with tab_data:
 
     ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
     df_viz = st.session_state.datasets[ds_name_viz]
-    try:
-        target_col_viz = get_last_numeric_target(df_viz)  # ALWAYS last numeric
-    except Exception as e:
-        st.error(f"Target detection failed: {e}")
-        st.stop()
+    target_col_viz = st.session_state.get(f"target_col__{ds_name_viz}")
 
-    currency_viz = get_currency_symbol(df_viz, target_col_viz)
-    st.caption(f"Target (auto: last numeric): **{target_col_viz}**")
-
-    # Optional: KNN imputation for viz only (cached)
     with st.expander("Visualization settings", expanded=False):
         use_knn = st.checkbox("Use KNN imputation for visualization (slower)", value=False)
         knn_k = st.slider("KNN neighbors", 2, 15, 5, 1, disabled=not use_knn)
@@ -841,14 +923,8 @@ with tab_data:
 
     ds_name_pred = st.selectbox("Dataset for prediction", list(st.session_state.datasets.keys()), key="ds_pred")
     df_pred = st.session_state.datasets[ds_name_pred]
-    try:
-        target_col_pred = get_last_numeric_target(df_pred)  # ALWAYS last numeric
-    except Exception as e:
-        st.error(f"Target detection failed: {e}")
-        st.stop()
-
+    target_col_pred = st.session_state.get(f"target_col__{ds_name_pred}")
     currency_pred = get_currency_symbol(df_pred, target_col_pred)
-    st.caption(f"Target (auto: last numeric): **{target_col_pred}**")
 
     st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
     c1, c2 = st.columns([1, 1])
@@ -878,13 +954,11 @@ with tab_data:
 
     project_name = st.text_input("Project Name", placeholder="e.g., Offshore Pipeline Replacement 2026")
 
-    # Train/load cached best model (no need to press "Run training" first)
     try:
-        default_test_size = 0.2
         pipe, metrics_auto, feat_cols, y_name, best_name = train_best_model_cached(
             df_pred,
             target_col_pred,
-            test_size=default_test_size,
+            test_size=0.2,
             random_state=42,
             dataset_key=ds_name_pred,
         )
@@ -1038,7 +1112,6 @@ with tab_data:
 # EXPORT HELPERS (Excel / PPT)
 # =======================================================================================
 def _format_ws_money(ws, start_row=2):
-    # apply number format and set widths; freeze header
     ws.freeze_panes = "A2"
     for c in range(1, ws.max_column + 1):
         ws.column_dimensions[get_column_letter(c)].width = 18
@@ -1084,7 +1157,6 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         max_row = ws.max_row
         max_col = ws.max_column
 
-        # conditional formatting numeric columns (Base CAPEX .. Grand Total)
         for col_idx in range(4, max_col + 1):
             col_letter = get_column_letter(col_idx)
             ws.conditional_formatting.add(
@@ -1102,10 +1174,9 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
                 ),
             )
 
-        # chart: Grand Total by Component
         chart = BarChart()
         chart.title = "Grand Total by Component"
-        data = Reference(ws, min_col=10, max_col=10, min_row=1, max_row=max_row - 1)  # Grand Total col
+        data = Reference(ws, min_col=10, max_col=10, min_row=1, max_row=max_row - 1)
         cats = Reference(ws, min_col=1, min_row=2, max_row=max_row - 1)
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
@@ -1115,7 +1186,6 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         chart.width = 18
         ws.add_chart(chart, "L2")
 
-        # line: Base CAPEX trend
         line = LineChart()
         line.title = "Base CAPEX Trend"
         data_capex = Reference(ws, min_col=4, max_col=4, min_row=1, max_row=max_row - 1)
@@ -1263,7 +1333,6 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
         max_row = ws.max_row
         max_col = ws.max_column
 
-        # conditional formatting numeric columns
         for col_idx in range(3, max_col + 1):
             col_letter = get_column_letter(col_idx)
             ws.conditional_formatting.add(
@@ -1281,7 +1350,6 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
                 ),
             )
 
-        # chart: Grand Total by Project
         chart = BarChart()
         chart.title = "Grand Total by Project"
         data = Reference(ws, min_col=8, max_col=8, min_row=1, max_row=max_row)
@@ -1294,7 +1362,6 @@ def create_comparison_excel_report_capex(projects_dict, currency=""):
         chart.width = 18
         ws.add_chart(chart, "J2")
 
-        # per-project detail
         for name, proj in projects_dict.items():
             dfc = project_components_df(proj)
             if dfc.empty:
@@ -1398,13 +1465,10 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
 
 
 # =======================================================================================
-# PROJECT BUILDER TAB
+# PROJECT BUILDER TAB (NO MONTE CARLO HERE)
 # =======================================================================================
 with tab_pb:
-    st.markdown(
-        '<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
 
     if not st.session_state.datasets:
         st.info("No dataset. Go to **Data** tab to upload or load.")
@@ -1431,14 +1495,8 @@ with tab_pb:
     dataset_for_comp = st.selectbox("Dataset for this component", ds_names, key="pb_dataset_for_component")
     df_comp = st.session_state.datasets[dataset_for_comp]
 
-    try:
-        target_col_comp = get_last_numeric_target(df_comp)  # ALWAYS last numeric
-    except Exception as e:
-        st.error(f"Target detection failed: {e}")
-        st.stop()
-
+    target_col_comp = st.session_state.get(f"target_col__{dataset_for_comp}")
     curr_ds = get_currency_symbol(df_comp, target_col_comp)
-    st.caption(f"Target (auto: last numeric): **{target_col_comp}**")
 
     default_label = st.session_state.component_labels.get(dataset_for_comp, "")
     component_type = st.text_input(
@@ -1447,9 +1505,8 @@ with tab_pb:
         key=f"pb_component_type_{proj_sel}",
     )
 
-    # Train cached best model for component dataset
     try:
-        pipe_c, metrics_c, feat_cols_c, y_name_c, best_name_c = train_best_model_cached(
+        pipe_c, _, feat_cols_c, y_name_c, best_name_c = train_best_model_cached(
             df_comp,
             target_col_comp,
             test_size=0.2,
@@ -1505,6 +1562,7 @@ with tab_pb:
                 "dataset": dataset_for_comp,
                 "model_used": best_name_c,
                 "inputs": {k: comp_payload.get(k, np.nan) for k in feat_cols_c},
+                "feature_cols": list(feat_cols_c),  # needed for MC
                 "prediction": base_pred,
                 "breakdown": {
                     "eprr_costs": eprr_costs,
@@ -1515,6 +1573,11 @@ with tab_pb:
                     "escalation_cost": escalation_cost,
                     "grand_total": grand_total,
                     "target_col": y_name_c,
+                    # store pct inputs for MC
+                    "sst_pct": float(sst_pb),
+                    "owners_pct": float(owners_pb),
+                    "cont_pct": float(cont_pb),
+                    "esc_pct": float(esc_pb),
                 },
             }
 
@@ -1631,6 +1694,209 @@ with tab_pb:
             st.rerun()
         except Exception as e:
             st.error(f"Failed to import project JSON: {e}")
+
+
+# =======================================================================================
+# 🎲 MONTE CARLO TAB (NEW)
+# =======================================================================================
+with tab_mc:
+    st.markdown('<h3 style="margin-top:0;color:#000;">🎲 Monte Carlo</h3>', unsafe_allow_html=True)
+    st.caption("Simulate uncertainty per component and roll-up to project Grand Total distribution.")
+
+    if not st.session_state.projects:
+        st.info("No projects found. Create a project first in **🏗️ Project Builder**.")
+        st.stop()
+
+    proj_names = list(st.session_state.projects.keys())
+    proj_sel_mc = st.selectbox("Select project", proj_names, key="mc_project_select")
+
+    proj = st.session_state.projects[proj_sel_mc]
+    comps = proj.get("components", [])
+    if not comps:
+        st.warning("This project has no components. Add components in **🏗️ Project Builder** first.")
+        st.stop()
+
+    # baseline + currency
+    t_mc = project_totals(proj)
+    curr = proj.get("currency", "") or ""
+    baseline_gt = float(t_mc["grand_total"])
+    st.info(f"Baseline (current Project Grand Total): **{curr} {baseline_gt:,.2f}**")
+
+    st.markdown("### Simulation settings")
+    mcA, mcB, mcC = st.columns(3)
+    with mcA:
+        mc_n_sims = st.number_input("Simulations", 500, 50000, 5000, 500, key=f"mc_n_{proj_sel_mc}")
+        mc_seed = st.number_input("Random seed", 0, 999999, 42, 1, key=f"mc_seed_{proj_sel_mc}")
+    with mcB:
+        mc_feat_sigma = st.slider("Feature uncertainty (±% stdev)", 0.0, 30.0, 5.0, 0.5, key=f"mc_feat_{proj_sel_mc}")
+        mc_pct_sigma = st.slider("Percent uncertainty (± abs stdev)", 0.0, 10.0, 1.0, 0.1, key=f"mc_pct_{proj_sel_mc}")
+    with mcC:
+        mc_norm_eprr = st.checkbox("Normalize EPRR to 100% each simulation", False, key=f"mc_norm_{proj_sel_mc}")
+        mc_budget = st.number_input(
+            "Budget threshold (Project Grand Total)",
+            min_value=0.0,
+            value=float(baseline_gt),
+            step=1000.0,
+            key=f"mc_budget_{proj_sel_mc}",
+        )
+
+    st.markdown("### Scenario buckets (Project Grand Total vs baseline)")
+    sb1, sb2, sb3 = st.columns(3)
+    with sb1:
+        mc_low = st.slider("Low < baseline by (%)", 0, 50, 10, 1, key=f"mc_low_{proj_sel_mc}")
+    with sb2:
+        mc_band = st.slider("Base band ± (%)", 1, 50, 10, 1, key=f"mc_band_{proj_sel_mc}")
+    with sb3:
+        mc_high = st.slider("High > baseline by (%)", 0, 50, 10, 1, key=f"mc_high_{proj_sel_mc}")
+
+    if st.button("Run Monte Carlo", type="primary", key=f"mc_run_{proj_sel_mc}"):
+        try:
+            with st.spinner("Running Monte Carlo for each component and rolling up..."):
+                n = int(mc_n_sims)
+                project_gt = np.zeros(n, dtype=float)
+                comp_summ_rows = []
+
+                for idx, comp in enumerate(comps):
+                    ds_name = comp["dataset"]
+                    df_ds = st.session_state.datasets.get(ds_name)
+                    if df_ds is None:
+                        raise ValueError(f"Dataset not found in session: {ds_name}")
+
+                    target_col = comp["breakdown"].get("target_col")
+                    if not target_col:
+                        raise ValueError(f"Component '{comp['component_type']}' missing breakdown.target_col")
+
+                    pipe_tmp, _, feat_cols_tmp, _, _ = train_best_model_cached(
+                        df_ds, target_col, test_size=0.2, random_state=42, dataset_key=ds_name
+                    )
+
+                    feat_cols = comp.get("feature_cols") or feat_cols_tmp
+                    payload = comp.get("inputs") or {}
+
+                    eprr_pct = comp["breakdown"].get("eprr_pct", {})
+                    sst_pct_c = float(comp["breakdown"].get("sst_pct", 0.0))
+                    owners_pct_c = float(comp["breakdown"].get("owners_pct", 0.0))
+                    cont_pct_c = float(comp["breakdown"].get("cont_pct", 0.0))
+                    esc_pct_c = float(comp["breakdown"].get("esc_pct", 0.0))
+
+                    comp_seed = int(mc_seed) + (idx + 1) * 101
+
+                    df_mc_c = monte_carlo_component(
+                        model_pipe=pipe_tmp,
+                        feature_cols=list(feat_cols),
+                        base_payload=payload,
+                        n_sims=n,
+                        seed=comp_seed,
+                        feature_sigma_pct=float(mc_feat_sigma),
+                        pct_sigma_abs=float(mc_pct_sigma),
+                        eprr=eprr_pct,
+                        sst_pct=sst_pct_c,
+                        owners_pct=owners_pct_c,
+                        cont_pct=cont_pct_c,
+                        esc_pct=esc_pct_c,
+                        normalize_eprr_each_draw=bool(mc_norm_eprr),
+                    )
+
+                    project_gt += df_mc_c["grand_total"].to_numpy(dtype=float)
+
+                    comp_summ_rows.append(
+                        {
+                            "Component": comp["component_type"],
+                            "Dataset": ds_name,
+                            "P50": float(df_mc_c["grand_total"].quantile(0.50)),
+                            "P80": float(df_mc_c["grand_total"].quantile(0.80)),
+                            "P90": float(df_mc_c["grand_total"].quantile(0.90)),
+                        }
+                    )
+
+                df_proj_mc = pd.DataFrame({"project_grand_total": project_gt})
+                buckets, pct_delta = scenario_bucket_from_baseline(
+                    df_proj_mc["project_grand_total"], baseline_gt, mc_low, mc_band, mc_high
+                )
+                df_proj_mc["Scenario"] = buckets
+                df_proj_mc["%Δ vs baseline"] = pct_delta
+
+                p50 = float(df_proj_mc["project_grand_total"].quantile(0.50))
+                p80 = float(df_proj_mc["project_grand_total"].quantile(0.80))
+                p90 = float(df_proj_mc["project_grand_total"].quantile(0.90))
+                exceed_prob = float((df_proj_mc["project_grand_total"] > float(mc_budget)).mean()) * 100.0
+
+                df_comp_mc = pd.DataFrame(comp_summ_rows)
+
+            st.markdown("### Summary")
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("P50 Project Grand Total", f"{curr} {p50:,.2f}")
+            m2.metric("P80 Project Grand Total", f"{curr} {p80:,.2f}")
+            m3.metric("P90 Project Grand Total", f"{curr} {p90:,.2f}")
+            m4.metric("P(> Budget)", f"{exceed_prob:.1f}%")
+
+            fig_hist = px.histogram(df_proj_mc, x="project_grand_total", nbins=60, title="Project Grand Total distribution")
+            st.plotly_chart(fig_hist, use_container_width=True)
+
+            bucket_counts = df_proj_mc["Scenario"].value_counts().reset_index()
+            bucket_counts.columns = ["Scenario", "Count"]
+            fig_bucket = px.bar(bucket_counts, x="Scenario", y="Count", title="Scenario bucket counts")
+            st.plotly_chart(fig_bucket, use_container_width=True)
+
+            st.markdown("### Component summary (P50/P80/P90)")
+            st.dataframe(
+                df_comp_mc.style.format({"P50": "{:,.2f}", "P80": "{:,.2f}", "P90": "{:,.2f}"}),
+                use_container_width=True,
+            )
+
+            with st.expander("Show Monte Carlo table (first 200 rows)", expanded=False):
+                st.dataframe(df_proj_mc.head(200), use_container_width=True)
+
+            # -------------------------
+            # ✅ DOWNLOADS (CSV + Excel + ZIP)
+            # -------------------------
+            st.markdown("### Download Monte Carlo results")
+
+            csv_proj = df_proj_mc.to_csv(index=False).encode("utf-8")
+            csv_comp = df_comp_mc.to_csv(index=False).encode("utf-8")
+
+            cold1, coldd2, coldd3 = st.columns(3)
+
+            with coldd2:
+                st.download_button(
+                    "⬇️ Download Project MC (CSV)",
+                    data=csv_proj,
+                    file_name=f"{proj_sel_mc}_mc_project.csv",
+                    mime="text/csv",
+                )
+
+            with coldd3:
+                st.download_button(
+                    "⬇️ Download Component MC Summary (CSV)",
+                    data=csv_comp,
+                    file_name=f"{proj_sel_mc}_mc_components.csv",
+                    mime="text/csv",
+                )
+
+            # Excel + Zip
+            bio_xlsx = io.BytesIO()
+            with pd.ExcelWriter(bio_xlsx, engine="openpyxl") as writer:
+                df_proj_mc.to_excel(writer, sheet_name="Project_MC", index=False)
+                df_comp_mc.to_excel(writer, sheet_name="Component_Summary", index=False)
+            bio_xlsx.seek(0)
+
+            zip_bio = io.BytesIO()
+            with zipfile.ZipFile(zip_bio, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr(f"{proj_sel_mc}_mc_project.csv", csv_proj)
+                zf.writestr(f"{proj_sel_mc}_mc_components.csv", csv_comp)
+                zf.writestr(f"{proj_sel_mc}_mc_results.xlsx", bio_xlsx.getvalue())
+            zip_bio.seek(0)
+
+            with coldd2:
+                st.download_button(
+                    "⬇️ Download MC Results (ZIP)",
+                    data=zip_bio.getvalue(),
+                    file_name=f"{proj_sel_mc}_mc_results.zip",
+                    mime="application/zip",
+                )
+
+        except Exception as e:
+            st.error(f"Monte Carlo failed: {e}")
 
 
 # =======================================================================================
@@ -1758,3 +2024,4 @@ with tab_compare:
             file_name="CAPEX_Projects_Comparison.pptx",
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         )
+
