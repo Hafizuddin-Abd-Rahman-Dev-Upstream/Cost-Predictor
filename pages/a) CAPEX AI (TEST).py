@@ -1,13 +1,12 @@
 # ======================================================================================
-# CAPEX AI RT2026 — FULL FIXED VERSION (Streamlit Cloud safe)
-# ✅ Fix: StreamlitDuplicateElementId (UNIQUE keys for ALL widgets that can repeat)
-# ✅ Fix: sklearn missing -> friendly error telling to add scikit-learn in requirements.txt
-# ✅ Monte Carlo is a NEW TOP-LEVEL TAB: 🎲 Monte Carlo
-# ✅ Data tab includes: Upload/Load + Target select + Train + Viz + Predict (Single/Batch) + Export ZIP
-# ✅ Project Builder tab: multi-component projects + export (Excel/PPT/JSON) + import JSON
-# ✅ Compare Projects tab: compare + export (Excel/PPT)
+# CAPEX AI RT2026 — FULL WHOLE CODE (Last Column Target + Monte Carlo Curves + TRUE Fan + Tornado + Excel/PPT)
 #
-# requirements.txt (MUST):
+# ✅ Target ALWAYS uses LAST COLUMN (fallback: coerce-to-numeric; if impossible -> last numeric with warning)
+# ✅ Unique keys everywhere (avoids StreamlitDuplicateElementId)
+# ✅ Monte Carlo: Histogram + CDF/Exceedance curve (budget marker) + TRUE Fan (probability axis)
+# ✅ Monte Carlo: Component TRUE Fan + Sensitivity Tornado + Excel/PPT exports
+#
+# requirements.txt:
 # streamlit
 # pandas
 # numpy
@@ -66,7 +65,6 @@ from pptx.dml.color import RGBColor
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
-
 
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
@@ -281,11 +279,8 @@ if "component_labels" not in st.session_state:
     st.session_state.component_labels = {}
 if "uploader_nonce" not in st.session_state:
     st.session_state.uploader_nonce = 0
-
-# ✅ key-fix: bump this whenever you want to force Streamlit to "forget" old widget identity
 if "widget_nonce" not in st.session_state:
     st.session_state.widget_nonce = 0
-
 
 # ---------------------------------------------------------------------------------------
 # HELPERS
@@ -340,20 +335,8 @@ def currency_from_header(header: str) -> str:
 def get_currency_symbol(df: pd.DataFrame, target_col: str | None = None) -> str:
     if df is None or df.empty:
         return ""
-
     if target_col and target_col in df.columns:
         return currency_from_header(str(target_col))
-
-    cost_cols = []
-    for c in df.columns:
-        if is_junk_col(c):
-            continue
-        h = str(c).strip().upper()
-        if "TOTAL" in h and "COST" in h:
-            cost_cols.append(c)
-    if cost_cols:
-        return currency_from_header(str(cost_cols[-1]))
-
     for c in reversed(df.columns):
         if not is_junk_col(c):
             return currency_from_header(str(c))
@@ -378,6 +361,7 @@ def cost_breakdown(
 
     eprr_costs = {k: round(base_pred * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
 
+    # FIX: includes SST
     grand_total = round(base_pred + owners_cost + sst_cost + contingency_cost + escalation_cost, 2)
     return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
 
@@ -417,6 +401,61 @@ def project_totals(proj):
 
 
 # ======================================================================================
+# TARGET ALWAYS LAST COLUMN (with safe numeric coercion)
+# ======================================================================================
+def get_last_column_target(df: pd.DataFrame) -> str:
+    if df is None or df.empty:
+        raise ValueError("Empty dataset.")
+    return str(df.columns[-1])
+
+
+def coerce_series_numeric(s: pd.Series) -> pd.Series:
+    if pd.api.types.is_numeric_dtype(s):
+        return s.astype(float)
+    return pd.to_numeric(s, errors="coerce")
+
+
+def numeric_features_from_df(df: pd.DataFrame, target_col: str) -> tuple[pd.DataFrame, pd.Series]:
+    """
+    - Target: ALWAYS df[target_col] (last column by default)
+    - Coerce target to numeric (errors->NaN)
+    - Features: numeric columns excluding target (coerce only numeric dtypes)
+    - If target becomes all NaN -> fallback to last numeric column (warn)
+    """
+    if target_col not in df.columns:
+        raise ValueError(f"Target column not found: {target_col}")
+
+    y_raw = df[target_col]
+    y = coerce_series_numeric(y_raw)
+
+    # numeric feature selection (exclude target)
+    X = df.drop(columns=[target_col]).select_dtypes(include=[np.number]).copy()
+
+    # if no numeric feature columns, try to coerce other columns? (skip to keep model sane)
+    if X.shape[1] < 1:
+        raise ValueError("Need at least 1 numeric feature column (excluding target).")
+
+    # If target is unusable, fallback to last numeric column
+    if y.dropna().shape[0] == 0:
+        num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        if len(num_cols) >= 2:
+            fallback = num_cols[-1]
+            st.warning(
+                f"⚠️ Last column '{target_col}' could not be converted to numeric. "
+                f"Falling back to last numeric column '{fallback}'."
+            )
+            y = df[fallback].astype(float)
+            X = df.drop(columns=[fallback]).select_dtypes(include=[np.number]).copy()
+            target_col = str(fallback)
+        else:
+            raise ValueError(
+                f"Last column '{target_col}' is not numeric and no numeric fallback target exists."
+            )
+
+    return X, y.astype(float)
+
+
+# ======================================================================================
 # ✅ MONTE CARLO HELPERS
 # ======================================================================================
 def _coerce_float(x, default=np.nan):
@@ -451,6 +490,7 @@ def monte_carlo_component(
     base_vec = np.array([_coerce_float(base_payload.get(c), np.nan) for c in feature_cols], dtype=float)
     Xsim = np.tile(base_vec, (n, 1))
 
+    # multiplicative feature noise on non-NaN
     sigma = float(feature_sigma_pct) / 100.0
     if sigma > 0:
         noise = rng.normal(0.0, sigma, size=Xsim.shape)
@@ -563,25 +603,6 @@ def list_csvs_from_manifest(folder_path: str):
         return []
 
 
-def prepare_numeric_df(df: pd.DataFrame) -> pd.DataFrame:
-    num = df.select_dtypes(include=[np.number]).copy()
-    num = num.dropna(axis=1, how="all")
-    if num.shape[1] < 2:
-        raise ValueError("Need at least 2 numeric columns (features + target).")
-    return num
-
-
-def build_X_y(df: pd.DataFrame, target_col: str):
-    num = prepare_numeric_df(df)
-    if target_col not in num.columns:
-        raise ValueError("Selected target is not numeric or not found.")
-    X = num.drop(columns=[target_col])
-    if X.shape[1] < 1:
-        raise ValueError("Need at least 1 numeric feature column.")
-    y = num[target_col]
-    return X, y
-
-
 def make_pipeline(model_name: str, random_state=42):
     ctor = MODEL_CANDIDATES[model_name]
     try:
@@ -623,12 +644,12 @@ def evaluate_models(X, y, test_size=0.2, random_state=42):
 
 @st.cache_resource(show_spinner=False)
 def train_best_model_cached(df: pd.DataFrame, target_col: str, test_size: float, random_state: int, dataset_key: str):
-    X, y = build_X_y(df, target_col)
+    X, y = numeric_features_from_df(df, target_col)
     metrics = evaluate_models(X, y, test_size=test_size, random_state=random_state)
     best_name = metrics.get("best_model") or "RandomForest"
     best_pipe = make_pipeline(best_name, random_state=random_state)
     best_pipe.fit(X, y)
-    return best_pipe, metrics, list(X.columns), y.name, best_name
+    return best_pipe, metrics, list(X.columns), target_col, best_name
 
 
 def single_prediction(model_pipe: Pipeline, feature_cols: list[str], payload: dict):
@@ -648,7 +669,11 @@ def single_prediction(model_pipe: Pipeline, feature_cols: list[str], payload: di
 
 @st.cache_data(show_spinner=False, ttl=600)
 def knn_impute_numeric(df: pd.DataFrame, k: int = 5):
-    num = prepare_numeric_df(df)
+    # purely numeric
+    num = df.select_dtypes(include=[np.number]).copy()
+    num = num.dropna(axis=1, how="all")
+    if num.shape[1] < 2:
+        raise ValueError("Need at least 2 numeric columns for KNN viz.")
     arr = KNNImputer(n_neighbors=k).fit_transform(num)
     return pd.DataFrame(arr, columns=num.columns)
 
@@ -775,29 +800,14 @@ with tab_data:
     st.divider()
 
     # -------------------------
-    # Active dataset preview + target selection
+    # Active dataset preview + target selection (NOW: always last column)
     # -------------------------
     if st.session_state.datasets:
         ds_name_data = st.selectbox("Active dataset", list(st.session_state.datasets.keys()), key="active_dataset_data")
         df_active = st.session_state.datasets[ds_name_data]
 
-        num_cols = df_active.select_dtypes(include=[np.number]).columns.tolist()
-        if len(num_cols) < 2:
-            st.warning("This dataset has < 2 numeric columns. Model requires numeric features + numeric target.")
-            st.stop()
-
-        target_key = f"target_col__{ds_name_data}"
-        if target_key not in st.session_state:
-            st.session_state[target_key] = num_cols[-1]
-
-        target_col_active = st.selectbox(
-            "Target (Cost) column",
-            options=num_cols,
-            index=num_cols.index(st.session_state[target_key])
-            if st.session_state[target_key] in num_cols
-            else len(num_cols) - 1,
-            key=target_key,
-        )
+        target_col_active = get_last_column_target(df_active)
+        st.session_state[f"target_col__{ds_name_data}"] = target_col_active
 
         currency_active = get_currency_symbol(df_active, target_col_active)
 
@@ -809,7 +819,7 @@ with tab_data:
         with colC:
             st.metric("Currency", f"{currency_active or '—'}")
         with colD2:
-            st.caption("Tip: Target defaults to last numeric column. Change it if your CSV includes extra numeric fields.")
+            st.caption(f"Target is forced to LAST column: **{target_col_active}**")
 
         with st.expander("Preview (first 10 rows)", expanded=False):
             st.dataframe(df_active.head(10), use_container_width=True)
@@ -823,14 +833,15 @@ with tab_data:
 
     ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
     df_model = st.session_state.datasets[ds_name_model]
-    target_col_model = st.session_state.get(f"target_col__{ds_name_model}")
+    target_col_model = get_last_column_target(df_model)
+    st.session_state[f"target_col__{ds_name_model}"] = target_col_model
 
     m1, m2 = st.columns([1, 3])
     with m1:
         test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05, key="train_test_size")
         run_train = st.button("Run training", key="run_training_btn")
     with m2:
-        st.caption("Automatic best-model selection over 6 regressors (median imputation; scaling for linear/SVR only).")
+        st.caption(f"Best-model selection over 6 regressors. Target forced to last column: {target_col_model}")
 
     if run_train:
         try:
@@ -867,65 +878,70 @@ with tab_data:
 
     ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
     df_viz = st.session_state.datasets[ds_name_viz]
-    target_col_viz = st.session_state.get(f"target_col__{ds_name_viz}")
+    target_col_viz = get_last_column_target(df_viz)
+    st.session_state[f"target_col__{ds_name_viz}"] = target_col_viz
 
     with st.expander("Visualization settings", expanded=False):
         use_knn = st.checkbox("Use KNN imputation for visualization (slower)", value=False, key="viz_knn")
         knn_k = st.slider("KNN neighbors", 2, 15, 5, 1, disabled=not use_knn, key="viz_knn_k")
 
     try:
+        # Viz: numeric-only matrix (best effort)
         if use_knn:
             num_imputed = knn_impute_numeric(df_viz, k=int(knn_k))
         else:
-            num = prepare_numeric_df(df_viz)
+            num = df_viz.select_dtypes(include=[np.number]).copy()
+            num = num.dropna(axis=1, how="all")
+            if num.shape[1] < 2:
+                raise ValueError("Not enough numeric columns for visualization.")
             num_imputed = pd.DataFrame(SimpleImputer(strategy="median").fit_transform(num), columns=num.columns)
 
-        if target_col_viz not in num_imputed.columns:
-            st.warning("Selected target column is not numeric for visualization.")
-        else:
-            X_viz = num_imputed.drop(columns=[target_col_viz])
-            y_viz = num_imputed[target_col_viz]
+        st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
+        corr = num_imputed.corr(numeric_only=True)
+        fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
+        fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_corr, use_container_width=True)
 
-            st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
-            corr = num_imputed.corr(numeric_only=True)
-            fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
-            fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig_corr, use_container_width=True)
+        st.markdown('<h4 style="margin:0;color:#000;">Feature Importance (RandomForest)</h4><p>Model insight</p>', unsafe_allow_html=True)
 
-            st.markdown('<h4 style="margin:0;color:#000;">Feature Importance (RandomForest)</h4><p>Model insight</p>', unsafe_allow_html=True)
-            model_viz = RandomForestRegressor(random_state=42).fit(X_viz, y_viz)
-            importances = model_viz.feature_importances_
-            fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
-            fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
-            fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig_fi, use_container_width=True)
+        # choose a target for viz if last column not numeric; use last numeric
+        viz_target = num_imputed.columns[-1]
+        X_viz = num_imputed.drop(columns=[viz_target])
+        y_viz = num_imputed[viz_target]
 
-            st.markdown('<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>', unsafe_allow_html=True)
-            feat = st.selectbox("Select feature for cost curve", list(X_viz.columns), key="viz_cost_curve_feat")
-            x_vals = X_viz[feat].to_numpy(dtype=float)
-            y_vals = y_viz.to_numpy(dtype=float)
-            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-            scatter_df = pd.DataFrame({feat: x_vals[mask], target_col_viz: y_vals[mask]})
-            fig_cc = px.scatter(scatter_df, x=feat, y=target_col_viz, opacity=0.65)
+        model_viz = RandomForestRegressor(random_state=42).fit(X_viz, y_viz)
+        importances = model_viz.feature_importances_
+        fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
+        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
+        fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_fi, use_container_width=True)
 
-            if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
-                xv = scatter_df[feat].to_numpy(dtype=float)
-                yv = scatter_df[target_col_viz].to_numpy(dtype=float)
-                slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
-                x_line = np.linspace(xv.min(), xv.max(), 100)
-                y_line = slope * x_line + intercept
-                fig_cc.add_trace(
-                    go.Scatter(
-                        x=x_line,
-                        y=y_line,
-                        mode="lines",
-                        name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
-                    )
+        st.markdown('<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>', unsafe_allow_html=True)
+        feat = st.selectbox("Select feature for cost curve", list(X_viz.columns), key="viz_cost_curve_feat")
+        x_vals = X_viz[feat].to_numpy(dtype=float)
+        y_vals = y_viz.to_numpy(dtype=float)
+        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+        scatter_df = pd.DataFrame({feat: x_vals[mask], "Target": y_vals[mask]})
+        fig_cc = px.scatter(scatter_df, x=feat, y="Target", opacity=0.65)
+
+        if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
+            xv = scatter_df[feat].to_numpy(dtype=float)
+            yv = scatter_df["Target"].to_numpy(dtype=float)
+            slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
+            x_line = np.linspace(xv.min(), xv.max(), 100)
+            y_line = slope * x_line + intercept
+            fig_cc.add_trace(
+                go.Scatter(
+                    x=x_line,
+                    y=y_line,
+                    mode="lines",
+                    name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
                 )
-            else:
-                st.warning("Not enough valid/variable data to compute regression.")
-            fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig_cc, use_container_width=True)
+            )
+        else:
+            st.warning("Not enough valid/variable data to compute regression.")
+        fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_cc, use_container_width=True)
 
     except Exception as e:
         st.error(f"Visualization error: {e}")
@@ -936,7 +952,8 @@ with tab_data:
 
     ds_name_pred = st.selectbox("Dataset for prediction", list(st.session_state.datasets.keys()), key="ds_pred")
     df_pred = st.session_state.datasets[ds_name_pred]
-    target_col_pred = st.session_state.get(f"target_col__{ds_name_pred}")
+    target_col_pred = get_last_column_target(df_pred)
+    st.session_state[f"target_col__{ds_name_pred}"] = target_col_pred
     currency_pred = get_currency_symbol(df_pred, target_col_pred)
 
     st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 1</p>', unsafe_allow_html=True)
@@ -975,7 +992,7 @@ with tab_data:
             dataset_key=ds_name_pred,
         )
         st.session_state._last_metrics = st.session_state._last_metrics or metrics_auto
-        st.caption(f"Using cached best model: **{best_name}** | Target: **{y_name}**")
+        st.caption(f"Using cached best model: **{best_name}** | Target (last col): **{y_name}**")
     except Exception as e:
         st.error(f"Model setup failed: {e}")
         st.stop()
@@ -986,7 +1003,6 @@ with tab_data:
         st.session_state[input_key] = {c: np.nan for c in feat_cols}
 
     row_df = pd.DataFrame([st.session_state[input_key]], columns=feat_cols)
-
     pred_editor_key = f"pred_editor__{ds_name_pred}__{st.session_state.widget_nonce}"
     edited = st.data_editor(row_df, num_rows="fixed", use_container_width=True, key=pred_editor_key)
     payload = edited.iloc[0].to_dict()
@@ -1085,7 +1101,6 @@ with tab_data:
     if preds:
         if st.button("🗑️ Delete all entries", key="delete_all_entries_btn"):
             st.session_state.predictions[ds_name_res] = []
-            # reset file history (best-effort)
             st.session_state.processed_excel_files = set()
             st.session_state.widget_nonce += 1
             toast("All entries removed.", "🗑️")
@@ -1481,6 +1496,148 @@ def create_comparison_pptx_report_capex(projects_dict, currency=""):
     return output
 
 
+# ======================================================================================
+# MONTE CARLO EXPORT HELPERS (Excel + PPT) — TRUE FAN (probability axis)
+# ======================================================================================
+def create_monte_carlo_excel_report(
+    project_name: str,
+    df_proj_mc: pd.DataFrame,
+    df_curve: pd.DataFrame,
+    df_fan_true: pd.DataFrame,
+    df_tornado: pd.DataFrame,
+    df_comp_sims: pd.DataFrame,
+) -> io.BytesIO:
+    out = io.BytesIO()
+    with pd.ExcelWriter(out, engine="openpyxl") as writer:
+        df_proj_mc.to_excel(writer, sheet_name="ProjectSims", index=False)
+        df_curve.to_excel(writer, sheet_name="Curve", index=False)
+        df_fan_true.to_excel(writer, sheet_name="Fan_True", index=False)
+        df_tornado.to_excel(writer, sheet_name="Tornado", index=False)
+        df_comp_sims.to_excel(writer, sheet_name="ComponentSims", index=False)
+
+        for name in ["ProjectSims", "Curve", "Fan_True", "Tornado", "ComponentSims"]:
+            ws = writer.sheets[name]
+            ws.freeze_panes = "A2"
+            for c in range(1, ws.max_column + 1):
+                ws.column_dimensions[get_column_letter(c)].width = 22
+    out.seek(0)
+    return out
+
+
+def create_monte_carlo_pptx_report(
+    project_name: str,
+    currency: str,
+    baseline_gt: float,
+    budget: float,
+    p50: float,
+    p80: float,
+    p90: float,
+    exceed_prob_pct: float,
+    df_curve: pd.DataFrame,
+    df_fan_true: pd.DataFrame,
+    df_tornado: pd.DataFrame,
+) -> io.BytesIO:
+    prs = Presentation()
+    prs.slide_width = Inches(10)
+    prs.slide_height = Inches(7.5)
+
+    layout_title_only = prs.slide_layouts[5]
+    layout_title_content = prs.slide_layouts[1]
+
+    # Slide 1: Title
+    s1 = prs.slides.add_slide(layout_title_only)
+    s1.shapes.title.text = f"Monte Carlo Report\n{project_name}"
+
+    # Slide 2: Summary
+    s2 = prs.slides.add_slide(layout_title_content)
+    s2.shapes.title.text = "Executive Summary"
+    tf = s2.shapes.placeholders[1].text_frame
+    tf.clear()
+    lines = [
+        f"Baseline GT: {currency} {baseline_gt:,.2f}",
+        f"Budget: {currency} {budget:,.2f}",
+        f"P50: {currency} {p50:,.2f}",
+        f"P80: {currency} {p80:,.2f}",
+        f"P90: {currency} {p90:,.2f}",
+        f"P(> Budget): {exceed_prob_pct:.1f}%",
+    ]
+    for i, line in enumerate(lines):
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.text = line
+        p.font.size = Pt(18)
+
+    # Slide 3: Curve
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
+    ax.plot(df_curve["x"], df_curve["cdf"], label="CDF (P ≤ X)")
+    ax.plot(df_curve["x"], df_curve["exceed"], label="Exceedance (P > X)", linestyle="--")
+    ax.axvline(p50, linestyle=":", label="P50")
+    ax.axvline(p80, linestyle=":", label="P80")
+    ax.axvline(p90, linestyle=":", label="P90")
+    ax.axvline(budget, linestyle="-.", label="Budget")
+    ax.set_title("CDF & Exceedance Curve")
+    ax.set_xlabel(f"Project Grand Total ({currency})")
+    ax.set_ylabel("Probability")
+    ax.grid(True, linestyle="--", alpha=0.3)
+    ax.legend(fontsize=9, ncol=2)
+    fig.tight_layout()
+
+    img = io.BytesIO()
+    fig.savefig(img, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig)
+    img.seek(0)
+
+    s3 = prs.slides.add_slide(layout_title_only)
+    s3.shapes.title.text = "CDF & Exceedance"
+    s3.shapes.add_picture(img, Inches(0.7), Inches(1.5), width=Inches(8.6))
+
+    # Slide 4: TRUE Fan (probability axis)
+    fig2, ax2 = plt.subplots(figsize=(8.5, 4.5))
+    ax2.fill_between(df_fan_true["prob"], df_fan_true["p10"], df_fan_true["p90"], alpha=0.25, label="P10–P90")
+    ax2.fill_between(df_fan_true["prob"], df_fan_true["p20"], df_fan_true["p80"], alpha=0.35, label="P20–P80")
+    ax2.fill_between(df_fan_true["prob"], df_fan_true["p40"], df_fan_true["p60"], alpha=0.45, label="P40–P60")
+    ax2.plot(df_fan_true["prob"], df_fan_true["p50"], linewidth=2.5, label="P50")
+    ax2.axhline(budget, linestyle="-.", label="Budget")
+    ax2.set_title("TRUE Fan Chart (Confidence → Cost)")
+    ax2.set_xlabel("Confidence Level (%)")
+    ax2.set_ylabel(f"Cost ({currency})")
+    ax2.grid(True, linestyle="--", alpha=0.3)
+    ax2.legend(fontsize=9, ncol=2)
+    fig2.tight_layout()
+
+    img2 = io.BytesIO()
+    fig2.savefig(img2, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig2)
+    img2.seek(0)
+
+    s4 = prs.slides.add_slide(layout_title_only)
+    s4.shapes.title.text = "TRUE Fan Chart"
+    s4.shapes.add_picture(img2, Inches(0.7), Inches(1.5), width=Inches(8.6))
+
+    # Slide 5: Tornado
+    df_t = df_tornado.sort_values("variance_share_pct", ascending=True)
+
+    fig3, ax3 = plt.subplots(figsize=(8.5, 4.5))
+    ax3.barh(df_t["Component"], df_t["variance_share_pct"])
+    ax3.set_title("Sensitivity Tornado (Variance Share)")
+    ax3.set_xlabel("Variance Contribution (%)")
+    ax3.grid(True, axis="x", linestyle="--", alpha=0.3)
+    fig3.tight_layout()
+
+    img3 = io.BytesIO()
+    fig3.savefig(img3, format="png", dpi=200, bbox_inches="tight")
+    plt.close(fig3)
+    img3.seek(0)
+
+    s5 = prs.slides.add_slide(layout_title_only)
+    s5.shapes.title.text = "Sensitivity Tornado"
+    s5.shapes.add_picture(img3, Inches(0.7), Inches(1.5), width=Inches(8.6))
+
+    out = io.BytesIO()
+    prs.save(out)
+    out.seek(0)
+    return out
+
+
 # =======================================================================================
 # PROJECT BUILDER TAB
 # =======================================================================================
@@ -1512,7 +1669,8 @@ with tab_pb:
     dataset_for_comp = st.selectbox("Dataset for this component", ds_names, key="pb_dataset_for_component")
     df_comp = st.session_state.datasets[dataset_for_comp]
 
-    target_col_comp = st.session_state.get(f"target_col__{dataset_for_comp}")
+    target_col_comp = get_last_column_target(df_comp)
+    st.session_state[f"target_col__{dataset_for_comp}"] = target_col_comp
     curr_ds = get_currency_symbol(df_comp, target_col_comp)
 
     default_label = st.session_state.component_labels.get(dataset_for_comp, "")
@@ -1590,7 +1748,7 @@ with tab_pb:
                     "contingency_cost": contingency_cost,
                     "escalation_cost": escalation_cost,
                     "grand_total": grand_total,
-                    "target_col": y_name_c,
+                    "target_col": y_name_c,  # last col
                     "sst_pct": float(sst_pb),
                     "owners_pct": float(owners_pb),
                     "cont_pct": float(cont_pb),
@@ -1720,7 +1878,7 @@ with tab_pb:
 
 
 # =======================================================================================
-# 🎲 MONTE CARLO TAB
+# 🎲 MONTE CARLO TAB (Curve + TRUE Fan + Tornado + Exports)
 # =======================================================================================
 with tab_mc:
     st.markdown('<h3 style="margin-top:0;color:#000;">🎲 Monte Carlo</h3>', unsafe_allow_html=True)
@@ -1780,19 +1938,23 @@ with tab_mc:
             with st.spinner("Running Monte Carlo for each component and rolling up..."):
                 n = int(mc_n_sims)
                 project_gt = np.zeros(n, dtype=float)
-                comp_summ_rows = []
 
+                comp_series = {}  # component_name -> np.array sims
+
+                comp_summ_rows = []
                 for idx, comp in enumerate(comps):
                     ds_name = comp["dataset"]
                     df_ds = st.session_state.datasets.get(ds_name)
                     if df_ds is None:
                         raise ValueError(f"Dataset not found in session: {ds_name}")
 
+                    # target stored per component as "target_col" (which is last col)
                     target_col = comp["breakdown"].get("target_col")
                     if not target_col:
-                        raise ValueError(f"Component '{comp['component_type']}' missing breakdown.target_col")
+                        # fallback to last column now
+                        target_col = get_last_column_target(df_ds)
 
-                    pipe_tmp, _, feat_cols_tmp, _, _ = train_best_model_cached(
+                    pipe_tmp, _, feat_cols_tmp, target_used, _ = train_best_model_cached(
                         df_ds, target_col, test_size=0.2, random_state=42, dataset_key=ds_name
                     )
 
@@ -1823,11 +1985,13 @@ with tab_mc:
                         normalize_eprr_each_draw=bool(mc_norm_eprr),
                     )
 
-                    project_gt += df_mc_c["grand_total"].to_numpy(dtype=float)
+                    c_name = comp["component_type"]
+                    comp_series[c_name] = df_mc_c["grand_total"].to_numpy(dtype=float)
+                    project_gt += comp_series[c_name]
 
                     comp_summ_rows.append(
                         {
-                            "Component": comp["component_type"],
+                            "Component": c_name,
                             "Dataset": ds_name,
                             "P50": float(df_mc_c["grand_total"].quantile(0.50)),
                             "P80": float(df_mc_c["grand_total"].quantile(0.80)),
@@ -1836,6 +2000,7 @@ with tab_mc:
                     )
 
                 df_proj_mc = pd.DataFrame({"project_grand_total": project_gt})
+
                 buckets, pct_delta = scenario_bucket_from_baseline(
                     df_proj_mc["project_grand_total"], baseline_gt, mc_low, mc_band, mc_high
                 )
@@ -1849,6 +2014,57 @@ with tab_mc:
 
                 df_comp_mc = pd.DataFrame(comp_summ_rows)
 
+                # -------------------------
+                # Curve data (CDF + Exceedance)
+                # -------------------------
+                df_curve = df_proj_mc[["project_grand_total"]].sort_values("project_grand_total").reset_index(drop=True)
+                n_curve = len(df_curve)
+                df_curve["cdf"] = np.arange(1, n_curve + 1) / n_curve
+                df_curve["exceed"] = 1.0 - df_curve["cdf"]
+                df_curve = df_curve.rename(columns={"project_grand_total": "x"})  # consistent
+
+                # -------------------------
+                # TRUE Fan data (probability axis)
+                # -------------------------
+                p_grid = np.linspace(0.01, 0.99, 200)
+                vals_proj = df_proj_mc["project_grand_total"]
+                df_fan_true = pd.DataFrame({
+                    "prob": p_grid * 100.0,
+                    "p10": np.full_like(p_grid, float(vals_proj.quantile(0.10))),
+                    "p20": np.full_like(p_grid, float(vals_proj.quantile(0.20))),
+                    "p40": np.full_like(p_grid, float(vals_proj.quantile(0.40))),
+                    "p50": np.full_like(p_grid, float(vals_proj.quantile(0.50))),
+                    "p60": np.full_like(p_grid, float(vals_proj.quantile(0.60))),
+                    "p80": np.full_like(p_grid, float(vals_proj.quantile(0.80))),
+                    "p90": np.full_like(p_grid, float(vals_proj.quantile(0.90))),
+                })
+
+                # -------------------------
+                # Tornado (variance share per component)
+                # -------------------------
+                df_comp_sims = pd.DataFrame(comp_series)  # columns: components
+                var_total = float(np.var(df_proj_mc["project_grand_total"].to_numpy(dtype=float), ddof=1))
+                tornado_rows = []
+                for c in df_comp_sims.columns:
+                    v = float(np.var(df_comp_sims[c].to_numpy(dtype=float), ddof=1))
+                    share = (v / var_total * 100.0) if var_total > 0 else 0.0
+                    tornado_rows.append(
+                        {
+                            "Component": c,
+                            "std_dev": float(np.std(df_comp_sims[c].to_numpy(dtype=float), ddof=1)),
+                            "variance": v,
+                            "variance_share_pct": share,
+                            "mean": float(np.mean(df_comp_sims[c].to_numpy(dtype=float))),
+                            "p50": float(np.quantile(df_comp_sims[c].to_numpy(dtype=float), 0.50)),
+                            "p80": float(np.quantile(df_comp_sims[c].to_numpy(dtype=float), 0.80)),
+                            "p90": float(np.quantile(df_comp_sims[c].to_numpy(dtype=float), 0.90)),
+                        }
+                    )
+                df_tornado = pd.DataFrame(tornado_rows).sort_values("variance_share_pct", ascending=False)
+
+            # -------------------------
+            # UI OUTPUTS
+            # -------------------------
             st.markdown("### Summary")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("P50 Project Grand Total", f"{curr} {p50:,.2f}")
@@ -1856,23 +2072,158 @@ with tab_mc:
             m3.metric("P90 Project Grand Total", f"{curr} {p90:,.2f}")
             m4.metric("P(> Budget)", f"{exceed_prob:.1f}%")
 
+            # Histogram
             fig_hist = px.histogram(df_proj_mc, x="project_grand_total", nbins=60, title="Project Grand Total distribution")
             st.plotly_chart(fig_hist, use_container_width=True)
 
+            # CDF + Exceedance curve + budget marker
+            fig_curve = go.Figure()
+            fig_curve.add_trace(go.Scatter(x=df_curve["x"], y=df_curve["cdf"], mode="lines", name="CDF (P ≤ X)", line=dict(width=3)))
+            fig_curve.add_trace(go.Scatter(x=df_curve["x"], y=df_curve["exceed"], mode="lines", name="Exceedance (P > X)",
+                                           line=dict(width=3, dash="dash")))
+
+            for val, label in [(p50, "P50"), (p80, "P80"), (p90, "P90")]:
+                fig_curve.add_vline(x=val, line_width=2, line_dash="dot", annotation_text=label, annotation_position="top")
+
+            fig_curve.add_vline(
+                x=float(mc_budget),
+                line_width=3,
+                line_dash="dashdot",
+                annotation_text=f"Budget | P(>Budget)={exceed_prob:.1f}%",
+                annotation_position="top right",
+            )
+
+            fig_curve.update_layout(
+                title="Monte Carlo Cost Curve (CDF & Exceedance)",
+                xaxis_title=f"Project Grand Total ({curr})",
+                yaxis_title="Probability",
+                yaxis=dict(tickformat=".0%"),
+                hovermode="x unified",
+                height=480,
+            )
+            st.plotly_chart(fig_curve, use_container_width=True)
+
+            # TRUE Fan chart (Project) — probability axis
+            fig_fan = go.Figure()
+
+            # P10–P90 band
+            fig_fan.add_trace(go.Scatter(x=df_fan_true["prob"], y=df_fan_true["p90"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan.add_trace(go.Scatter(
+                x=df_fan_true["prob"], y=df_fan_true["p10"],
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(0,161,155,0.20)",
+                name="P10–P90"
+            ))
+
+            # P20–P80 band
+            fig_fan.add_trace(go.Scatter(x=df_fan_true["prob"], y=df_fan_true["p80"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan.add_trace(go.Scatter(
+                x=df_fan_true["prob"], y=df_fan_true["p20"],
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(108,77,211,0.25)",
+                name="P20–P80"
+            ))
+
+            # P40–P60 band
+            fig_fan.add_trace(go.Scatter(x=df_fan_true["prob"], y=df_fan_true["p60"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan.add_trace(go.Scatter(
+                x=df_fan_true["prob"], y=df_fan_true["p40"],
+                mode="lines", fill="tonexty",
+                fillcolor="rgba(0,0,0,0.20)",
+                name="P40–P60"
+            ))
+
+            # Median
+            fig_fan.add_trace(go.Scatter(x=df_fan_true["prob"], y=df_fan_true["p50"], mode="lines", line=dict(width=3), name="P50"))
+            fig_fan.add_hline(y=float(mc_budget), line_width=2, line_dash="dashdot", annotation_text="Budget", annotation_position="top left")
+
+            fig_fan.update_layout(
+                title="TRUE Fan Chart — Project Grand Total (Confidence → Cost)",
+                xaxis_title="Confidence Level (%)",
+                yaxis_title=f"Cost ({curr})",
+                height=480,
+            )
+            st.plotly_chart(fig_fan, use_container_width=True)
+
+            # Scenario buckets
             bucket_counts = df_proj_mc["Scenario"].value_counts().reset_index()
             bucket_counts.columns = ["Scenario", "Count"]
             fig_bucket = px.bar(bucket_counts, x="Scenario", y="Count", title="Scenario bucket counts")
             st.plotly_chart(fig_bucket, use_container_width=True)
 
+            # Component summary
             st.markdown("### Component summary (P50/P80/P90)")
             st.dataframe(
                 df_comp_mc.style.format({"P50": "{:,.2f}", "P80": "{:,.2f}", "P90": "{:,.2f}"}),
                 use_container_width=True,
             )
 
+            # TRUE Fan chart (Component)
+            st.markdown("### TRUE Fan Chart (Component)")
+            comp_pick = st.selectbox("Select component", list(df_comp_sims.columns), key=f"mc_comp_pick_{proj_sel_mc}")
+
+            vals_c = pd.Series(df_comp_sims[comp_pick].to_numpy(dtype=float))
+            df_fan_c = pd.DataFrame({
+                "prob": p_grid * 100.0,
+                "p10": np.full_like(p_grid, float(vals_c.quantile(0.10))),
+                "p20": np.full_like(p_grid, float(vals_c.quantile(0.20))),
+                "p40": np.full_like(p_grid, float(vals_c.quantile(0.40))),
+                "p50": np.full_like(p_grid, float(vals_c.quantile(0.50))),
+                "p60": np.full_like(p_grid, float(vals_c.quantile(0.60))),
+                "p80": np.full_like(p_grid, float(vals_c.quantile(0.80))),
+                "p90": np.full_like(p_grid, float(vals_c.quantile(0.90))),
+            })
+
+            fig_fan_c = go.Figure()
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p90"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p10"], fill="tonexty", mode="lines",
+                                           fillcolor="rgba(0,161,155,0.20)", name="P10–P90"))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p80"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p20"], fill="tonexty", mode="lines",
+                                           fillcolor="rgba(108,77,211,0.25)", name="P20–P80"))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p60"], mode="lines", line=dict(width=0), showlegend=False))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p40"], fill="tonexty", mode="lines",
+                                           fillcolor="rgba(0,0,0,0.20)", name="P40–P60"))
+            fig_fan_c.add_trace(go.Scatter(x=df_fan_c["prob"], y=df_fan_c["p50"], mode="lines", line=dict(width=3), name="P50"))
+            fig_fan_c.update_layout(
+                title=f"TRUE Fan — Component: {comp_pick}",
+                xaxis_title="Confidence Level (%)",
+                yaxis_title=f"Cost ({curr})",
+                height=460,
+            )
+            st.plotly_chart(fig_fan_c, use_container_width=True)
+
+            # Tornado
+            st.markdown("### Sensitivity Tornado (Variance Contribution)")
+            fig_tornado = px.bar(
+                df_tornado,
+                x="variance_share_pct",
+                y="Component",
+                orientation="h",
+                title="Sensitivity Tornado (Variance Share %)",
+            )
+            fig_tornado.update_layout(xaxis_title="Variance contribution (%)", height=520)
+            st.plotly_chart(fig_tornado, use_container_width=True)
+
+            st.dataframe(
+                df_tornado.style.format(
+                    {
+                        "std_dev": "{:,.2f}",
+                        "variance": "{:,.2f}",
+                        "variance_share_pct": "{:,.1f}",
+                        "mean": "{:,.2f}",
+                        "p50": "{:,.2f}",
+                        "p80": "{:,.2f}",
+                        "p90": "{:,.2f}",
+                    }
+                ),
+                use_container_width=True,
+            )
+
             with st.expander("Show Monte Carlo table (first 200 rows)", expanded=False):
                 st.dataframe(df_proj_mc.head(200), use_container_width=True)
 
+            # Downloads (CSV + ZIP)
             st.markdown("### Download Monte Carlo results")
             csv_proj = df_proj_mc.to_csv(index=False).encode("utf-8")
             csv_comp = df_comp_mc.to_csv(index=False).encode("utf-8")
@@ -1915,6 +2266,48 @@ with tab_mc:
                     file_name=f"{proj_sel_mc}_mc_results.zip",
                     mime="application/zip",
                     key=f"mc_dl_zip_{proj_sel_mc}",
+                )
+
+            # Excel + PPT report exports (true fan + tornado + sims)
+            st.markdown("### Download Monte Carlo reports (Excel / PPT)")
+            mc_excel = create_monte_carlo_excel_report(
+                project_name=proj_sel_mc,
+                df_proj_mc=df_proj_mc.rename(columns={"project_grand_total": "Project Grand Total"}),
+                df_curve=df_curve,
+                df_fan_true=df_fan_true,
+                df_tornado=df_tornado,
+                df_comp_sims=df_comp_sims,
+            )
+            mc_ppt = create_monte_carlo_pptx_report(
+                project_name=proj_sel_mc,
+                currency=curr,
+                baseline_gt=float(baseline_gt),
+                budget=float(mc_budget),
+                p50=float(p50),
+                p80=float(p80),
+                p90=float(p90),
+                exceed_prob_pct=float(exceed_prob),
+                df_curve=df_curve,
+                df_fan_true=df_fan_true,
+                df_tornado=df_tornado,
+            )
+
+            r1, r2 = st.columns(2)
+            with r1:
+                st.download_button(
+                    "⬇️ Download MC Excel (Curve+Fan+Tornado+Sims)",
+                    data=mc_excel,
+                    file_name=f"{proj_sel_mc}_MonteCarlo_Report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"mc_dl_excel_{proj_sel_mc}",
+                )
+            with r2:
+                st.download_button(
+                    "⬇️ Download MC PowerPoint (Curve+Fan+Tornado)",
+                    data=mc_ppt,
+                    file_name=f"{proj_sel_mc}_MonteCarlo_Report.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    key=f"mc_dl_ppt_{proj_sel_mc}",
                 )
 
         except Exception as e:
