@@ -701,7 +701,7 @@ for col, label in zip(nav_cols, nav_labels):
 # TOP-LEVEL TABS
 # ---------------------------------------------------------------------------------------
 tab_data, tab_pb, tab_mc, tab_compare = st.tabs(
-    ["📊 Data", "🏗️ Project Builder", "🎲 Monte Carlo", "🔀 Compare Projects"]
+    ["📊 Data", "🏗️ Project Builder", "🎲 Simulation", "🔀 Compare Projects"]
 )
 
 # =======================================================================================
@@ -2444,3 +2444,4 @@ with tab_compare:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             key="cmp_dl_ppt",
         )
+
