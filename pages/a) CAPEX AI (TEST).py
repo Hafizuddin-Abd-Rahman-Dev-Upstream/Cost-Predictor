@@ -1,10 +1,6 @@
 # ======================================================================================
-# CAPEX AI RT2026 — FULL WHOLE CODE (Last Column Target + Monte Carlo Curves + TRUE Fan + Tornado + Excel/PPT)
+# CAPEX AI RT2026 
 #
-# ✅ Target ALWAYS uses LAST COLUMN (fallback: coerce-to-numeric; if impossible -> last numeric with warning)
-# ✅ Unique keys everywhere (avoids StreamlitDuplicateElementId)
-# ✅ Monte Carlo: Histogram + CDF/Exceedance curve (budget marker) + TRUE Fan (probability axis)
-# ✅ Monte Carlo: Component TRUE Fan + Sensitivity Tornado + Excel/PPT exports
 #
 # requirements.txt:
 # streamlit
@@ -701,7 +697,7 @@ for col, label in zip(nav_cols, nav_labels):
 # TOP-LEVEL TABS
 # ---------------------------------------------------------------------------------------
 tab_data, tab_pb, tab_mc, tab_compare = st.tabs(
-    ["📊 Data", "🏗️ Project Builder", "🎲 Simulation", "🔀 Compare Projects"]
+    ["📊 Data", "🏗️ Project Builder", "🎲 Monte Carlo", "🔀 Compare Projects"]
 )
 
 # =======================================================================================
@@ -2444,4 +2440,3 @@ with tab_compare:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             key="cmp_dl_ppt",
         )
-
