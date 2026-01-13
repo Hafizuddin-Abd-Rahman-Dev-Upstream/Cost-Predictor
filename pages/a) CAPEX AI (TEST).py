@@ -956,11 +956,12 @@ with tab_data:
     c1, c2 = st.columns([1, 1])
     with c1:
         st.markdown("**EPRR Breakdown (%)** (use +/-)")
+        eng = st.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0, step=1.0, key="pred_eng")
         procurement = st.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_procurement")
         fabrication = st.number_input("Fabrication/Construction (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_fabrication")
-        ti = st.number_input("Transportation & Installation (T&I) (%)", min_value=0.0, max_value=100.0, value=34.0, step=1.0, key="pred_ti")
+        ti = st.number_input("Transportation & Installation (T&I) (%)", min_value=0.0, max_value=100.0, value=22.0, step=1.0, key="pred_ti")
 
-        eprr = {"Procurement": procurement, "Fabrication/Construction": fabrication, "Transportation & Installation": ti}
+        eprr = {"Engineering": eng, "Procurement": procurement, "Fabrication/Construction": fabrication, "Transportation & Installation": ti}
         eprr_total = sum(eprr.values())
         st.caption(f"EPRR total: **{eprr_total:.2f}%**")
 
@@ -1698,11 +1699,12 @@ with tab_pb:
     cp1, cp2 = st.columns(2)
     with cp1:
         st.markdown("EPRR (%) — use +/-")
+        eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
         procurement_pb = st.number_input("Procurement", 0.0, 100.0, 33.0, 1.0, key=f"pb_procurement_{proj_sel}")
         fabrication_pb = st.number_input("Fabrication/Construction", 0.0, 100.0, 33.0, 1.0, key=f"pb_fabrication_{proj_sel}")
-        ti_pb = st.number_input("Transportation & Installation (T&I)", 0.0, 100.0, 34.0, 1.0, key=f"pb_ti_{proj_sel}")
+        ti_pb = st.number_input("Transportation & Installation (T&I)", 0.0, 100.0, 22.0, 1.0, key=f"pb_ti_{proj_sel}")
 
-        eprr_pb = {"Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
+        eprr_pb = {"Engineering": eng_pb, "Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
         eprr_total_pb = sum(eprr_pb.values())
         st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
 
