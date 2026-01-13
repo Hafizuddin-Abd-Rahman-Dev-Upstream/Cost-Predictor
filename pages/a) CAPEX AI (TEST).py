@@ -963,7 +963,7 @@ with tab_data:
 
         eprr = {"Engineering": eng, "Procurement": procurement, "Fabrication/Construction": fabrication, "Transportation & Installation": ti}
         eprr_total = sum(eprr.values())
-        st.caption(f" total: **{eprr_total:.2f}%**")
+        st.caption(f"WBS total: **{eprr_total:.2f}%**")
 
     with c2:
         st.markdown("(use +/-)")
@@ -1706,7 +1706,7 @@ with tab_pb:
 
         eprr_pb = {"Engineering": eng_pb, "Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
         eprr_total_pb = sum(eprr_pb.values())
-        st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
+        st.caption(f"WBS total: **{eprr_total_pb:.2f}%**")
 
     with cp2:
         st.markdown("use +/-")
@@ -1904,7 +1904,7 @@ with tab_mc:
         mc_feat_sigma = st.slider("Feature uncertainty (±% stdev)", 0.0, 30.0, 5.0, 0.5, key=f"mc_feat_{proj_sel_mc}")
         mc_pct_sigma = st.slider("Percent uncertainty (± abs stdev)", 0.0, 10.0, 1.0, 0.1, key=f"mc_pct_{proj_sel_mc}")
     with mcC:
-        mc_norm_eprr = st.checkbox("Normalize EPRR to 100% each simulation", False, key=f"mc_norm_{proj_sel_mc}")
+        mc_norm_eprr = st.checkbox("Normalize WBS to 100% each simulation", False, key=f"mc_norm_{proj_sel_mc}")
         mc_budget = st.number_input(
             "Budget threshold (Project Grand Total)",
             min_value=0.0,
@@ -2433,5 +2433,6 @@ with tab_compare:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             key="cmp_dl_ppt",
         )
+
 
 
