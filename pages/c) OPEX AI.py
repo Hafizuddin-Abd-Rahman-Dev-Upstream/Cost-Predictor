@@ -209,7 +209,7 @@ st.markdown(
     """
 <div class="petronas-hero">
   <h1>OPEX AI RT2026</h1>
-  <p>Data-driven OPEX prediction</p>
+  <p>Data-driven OPEX prediction with Six Lenses Analysis</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -285,11 +285,6 @@ def format_with_commas(num):
 def get_currency_symbol(df: pd.DataFrame) -> str:
     """
     Detect currency from the target cost column.
-
-    Your rule:
-    - Currency column is usually the LAST column (e.g. "Total Cost (Mil USD)").
-    - If there are multiple "Total Cost ..." columns, choose the LAST "Total Cost" column.
-    - Fallback: choose the last non-junk column.
     """
     if df is None or df.empty:
         return ""
@@ -306,7 +301,7 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
             cost_cols.append(c)
 
     if cost_cols:
-        preferred = cost_cols[-1]  # <-- LAST Total Cost column
+        preferred = cost_cols[-1]
     else:
         # 2) Fallback: last non-junk column
         preferred = None
@@ -328,7 +323,7 @@ def get_currency_symbol(df: pd.DataFrame) -> str:
     if "$" in header:
         return "USD"
 
-    # codes (strict word boundaries)
+    # codes
     if re.search(r"\bUSD\b", header):
         return "USD"
     if re.search(r"\b(MYR|RM)\b", header):
@@ -350,42 +345,192 @@ def normalize_to_100(d: dict):
     return rounded, total
 
 
-def cost_breakdown(
+# =========================
+# NEW: SIX LENSES structure
+# =========================
+def get_six_lenses_default():
+    """Return default Six Lenses structure with subcategories"""
+    return {
+        # Lens 1: Sub-Surface Operations
+        "Work Over": 0.0,
+        "Well Services": 0.0,
+        "Well Stimulation": 0.0,
+        "Major Maintenance Underwater": 0.0,
+        "Operations Manpower": 0.0,
+        "Special Studies": 0.0,  # FFR, Well PnA, Technology
+        
+        # Lens 2: Surface Routine Operations
+        "Operations": 0.0,
+        "Gas Royalty": 0.0,
+        "Miscellaneous": 0.0,
+        "Technology (Desander, etc)": 0.0,
+        
+        # Lens 3: Maintenance
+        "Major Maintenance Topside": 0.0,
+        "Major Maintenance (Onshore Terminal)": 0.0,
+        
+        # Lens 4: Logistics
+        "Vessel Operations": 0.0,
+        "Helicopter Operations": 0.0,
+        "Fixed Wings Operations": 0.0,
+        "Land Transport": 0.0,
+        "Base/Warehouse Operations": 0.0,
+        
+        # Lens 5: General Overhead
+        "Admin & Support (Non-Technical)": 0.0,
+        "Corporate Charges": 0.0,
+        "Rental": 0.0,
+        "Administrative Utilities": 0.0,
+        "Insurance": 0.0,
+        
+        # Lens 6: Other Production Operations Cost
+        "Processing Fee Income": 0.0,
+        "Tariff [SST]": 0.0,
+        "Pipeline Tariff": 0.0,
+        "Facilities Charges": 0.0,
+        "Other Prod Operations Costs": 0.0,
+    }
+
+
+def cost_breakdown_six_lenses(
     base_pred: float,
-    eprr: dict,
-    sst_pct: float,
+    lenses: dict,
     owners_pct: float,
     cont_pct: float,
     esc_pct: float,
 ):
+    """
+    Calculate cost breakdown using the Six Lenses structure
+    Note: SST is now part of Lens 6 (Tariff [SST]), not a separate financial adjustment
+    """
+    # Calculate lens costs
+    lens_costs = {k: round(float(base_pred) * (float(v) / 100.0), 2) for k, v in (lenses or {}).items()}
+    
+    # Calculate standard financial adjustments (excluding SST - now in Lens 6)
     owners_cost = round(float(base_pred) * (owners_pct / 100.0), 2)
-    sst_cost = round(float(base_pred) * (sst_pct / 100.0), 2)
     contingency_cost = round((float(base_pred) + owners_cost) * (cont_pct / 100.0), 2)
     escalation_cost = round((float(base_pred) + owners_cost) * (esc_pct / 100.0), 2)
-
-    eprr_costs = {k: round(float(base_pred) * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
-    grand_total = round(float(base_pred) + owners_cost + contingency_cost + escalation_cost, 2)
-
-    return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
+    
+    # Grand total includes all components
+    grand_total = round(
+        float(base_pred) + owners_cost + contingency_cost + escalation_cost + sum(lens_costs.values()), 
+        2
+    )
+    
+    return owners_cost, contingency_cost, escalation_cost, lens_costs, grand_total
 
 
 def project_components_df(proj):
     comps = proj.get("components", [])
     rows = []
     for c in comps:
-        rows.append(
-            {
-                "Component": c["component_type"],
-                "Dataset": c["dataset"],
-                "Base OPEX": float(c["prediction"]),
-                "Owner's Cost": float(c["breakdown"]["owners_cost"]),
-                "Contingency": float(c["breakdown"]["contingency_cost"]),
-                "Escalation": float(c["breakdown"]["escalation_cost"]),
-                "SST": float(c["breakdown"]["sst_cost"]),
-                "Grand Total": float(c["breakdown"]["grand_total"]),
-            }
-        )
+        breakdown = c["breakdown"]
+        lens_costs = breakdown.get("lens_costs", {})
+        
+        # Create a row with all lens columns
+        row_data = {
+            "Component": c["component_type"],
+            "Dataset": c["dataset"],
+            "Base OPEX": float(c["prediction"]),
+            "Owner's Cost": float(breakdown["owners_cost"]),
+            "Contingency": float(breakdown["contingency_cost"]),
+            "Escalation": float(breakdown["escalation_cost"]),
+        }
+        
+        # Add all lens costs
+        for lens_name, lens_cost in lens_costs.items():
+            row_data[lens_name] = float(lens_cost)
+        
+        row_data["Grand Total"] = float(breakdown["grand_total"])
+        rows.append(row_data)
+    
     return pd.DataFrame(rows)
+
+
+# =========================
+# NEW: Create UI for Six Lenses input
+# =========================
+def create_six_lenses_input_ui(key_prefix=""):
+    """Create expandable sections for Six Lenses input"""
+    lenses = {}
+    
+    # Lens 1: Sub-Surface Operations
+    with st.expander("🔍 **Lens 1: Sub-Surface Operations**", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            lenses["Work Over"] = st.number_input("Work Over (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_work_over")
+            lenses["Well Services"] = st.number_input("Well Services (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_well_services")
+        with col2:
+            lenses["Well Stimulation"] = st.number_input("Well Stimulation (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_well_stim")
+            lenses["Major Maintenance Underwater"] = st.number_input("MM Underwater (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_mm_underwater")
+        with col3:
+            lenses["Operations Manpower"] = st.number_input("Operations Manpower (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_ops_manpower")
+            lenses["Special Studies"] = st.number_input("Special Studies (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_special_studies")
+    
+    # Lens 2: Surface Routine Operations
+    with st.expander("🏗️ **Lens 2: Surface Routine Operations**", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            lenses["Operations"] = st.number_input("Operations (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_operations")
+            lenses["Gas Royalty"] = st.number_input("Gas Royalty (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_gas_royalty")
+        with col2:
+            lenses["Miscellaneous"] = st.number_input("Miscellaneous (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_misc")
+            lenses["Technology (Desander, etc)"] = st.number_input("Technology (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_tech_desander")
+    
+    # Lens 3: Maintenance
+    with st.expander("🔧 **Lens 3: Maintenance**", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            lenses["Major Maintenance Topside"] = st.number_input("MM Topside (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_mm_topside")
+        with col2:
+            lenses["Major Maintenance (Onshore Terminal)"] = st.number_input("MM Onshore (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_mm_onshore")
+    
+    # Lens 4: Logistics
+    with st.expander("🚢 **Lens 4: Logistics**", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            lenses["Vessel Operations"] = st.number_input("Vessel Ops (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_vessel")
+            lenses["Helicopter Operations"] = st.number_input("Helicopter Ops (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_heli")
+        with col2:
+            lenses["Fixed Wings Operations"] = st.number_input("Fixed Wings Ops (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_fixed_wing")
+            lenses["Land Transport"] = st.number_input("Land Transport (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_land_transport")
+        with col3:
+            lenses["Base/Warehouse Operations"] = st.number_input("Base/Warehouse (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_base_warehouse")
+    
+    # Lens 5: General Overhead
+    with st.expander("🏢 **Lens 5: General Overhead**", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            lenses["Admin & Support (Non-Technical)"] = st.number_input("Admin & Support (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_admin")
+            lenses["Corporate Charges"] = st.number_input("Corporate Charges (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_corporate")
+        with col2:
+            lenses["Rental"] = st.number_input("Rental (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_rental")
+            lenses["Administrative Utilities"] = st.number_input("Admin Utilities (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_admin_utils")
+        with col3:
+            lenses["Insurance"] = st.number_input("Insurance (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_insurance")
+    
+    # Lens 6: Other Production Operations Cost
+    with st.expander("💰 **Lens 6: Other Production Operations Cost**", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            lenses["Processing Fee Income"] = st.number_input("Processing Fee (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_processing_fee")
+            lenses["Tariff [SST]"] = st.number_input("Tariff [SST] (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_tariff_sst")
+            lenses["Pipeline Tariff"] = st.number_input("Pipeline Tariff (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_pipeline_tariff")
+        with col2:
+            lenses["Facilities Charges"] = st.number_input("Facilities Charges (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_facilities")
+            lenses["Other Prod Operations Costs"] = st.number_input("Other Prod Ops (%)", 0.0, 100.0, 0.0, 0.5, key=f"{key_prefix}_other_prod_ops")
+    
+    # Calculate total lenses percentage
+    total_lenses = sum(lenses.values())
+    st.metric("Total Six Lenses Allocation", f"{total_lenses:.2f}%")
+    
+    # Normalization option
+    apply_norm = st.checkbox("Normalize Six Lenses to 100%", value=False, key=f"{key_prefix}_norm_lenses")
+    if apply_norm and total_lenses > 0 and abs(total_lenses - 100.0) > 1e-6:
+        lenses, _ = normalize_to_100(lenses)
+        st.info(f"Normalized to 100%")
+    
+    return lenses
 
 
 def create_project_excel_report_OPEX(project_name, proj, currency=""):
@@ -411,7 +556,10 @@ def create_project_excel_report_OPEX(project_name, proj, currency=""):
         "Owner's Cost": comps_df["Owner's Cost"].sum(),
         "Contingency": comps_df["Contingency"].sum(),
         "Escalation": comps_df["Escalation"].sum(),
-        "SST": comps_df["SST"].sum(),
+        **{col: comps_df[col].sum() for col in comps_df.columns if col not in [
+            "Component", "Dataset", "Base OPEX", "Owner's Cost", "Contingency", 
+            "Escalation", "Grand Total"
+        ]},
         "Grand Total": total_grand,
     }
 
@@ -441,7 +589,7 @@ def create_project_excel_report_OPEX(project_name, proj, currency=""):
 
         chart = BarChart()
         chart.title = "Grand Total by Component"
-        data = Reference(ws, min_col=8, max_col=8, min_row=1, max_row=max_row - 1)
+        data = Reference(ws, min_col=ws.max_column, max_col=ws.max_column, min_row=1, max_row=max_row - 1)
         cats = Reference(ws, min_col=1, min_row=2, max_row=max_row - 1)
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
@@ -449,17 +597,7 @@ def create_project_excel_report_OPEX(project_name, proj, currency=""):
         chart.x_axis.title = "Component"
         chart.height = 10
         chart.width = 18
-        ws.add_chart(chart, "J2")
-
-        line = LineChart()
-        line.title = "Base OPEX Trend"
-        data_OPEX = Reference(ws, min_col=3, max_col=3, min_row=1, max_row=max_row - 1)
-        line.add_data(data_OPEX, titles_from_data=True)
-        line.set_categories(cats)
-        line.y_axis.title = f"Base OPEX ({currency})".strip()
-        line.height = 10
-        line.width = 18
-        ws.add_chart(line, "J20")
+        ws.add_chart(chart, f"{get_column_letter(ws.max_column + 2)}2")
 
         comps_df.to_excel(writer, sheet_name="Components Detail", index=False)
 
@@ -477,7 +615,7 @@ def create_project_pptx_report_OPEX(project_name, proj, currency=""):
 
     slide = prs.slides.add_slide(layout_title_only)
     title = slide.shapes.title
-    title.text = f"OPEX Project Report\n{project_name}"
+    title.text = f"OPEX Project Report\n{project_name}\n(Six Lenses Analysis)"
     p = title.text_frame.paragraphs[0]
     p.alignment = PP_ALIGN.LEFT
     p.font.size = Pt(32)
@@ -490,27 +628,55 @@ def create_project_pptx_report_OPEX(project_name, proj, currency=""):
     total_grand = comps_df["Grand Total"].sum() if not comps_df.empty else 0.0
 
     slide = prs.slides.add_slide(layout_title_content)
-    slide.shapes.title.text = "Executive Summary"
+    slide.shapes.title.text = "Executive Summary - Six Lenses Analysis"
     body = slide.shapes.placeholders[1].text_frame
     body.clear()
 
+    # Get lens columns (exclude standard columns)
+    lens_columns = [col for col in comps_df.columns if col not in [
+        "Component", "Dataset", "Base OPEX", "Owner's Cost", "Contingency", 
+        "Escalation", "Grand Total"
+    ]]
+    
     lines = [
         f"Project: {project_name}",
         f"Total Components: {len(comps)}",
         f"Total Base OPEX: {currency} {total_OPEX:,.2f}",
         f"Total Grand Total: {currency} {total_grand:,.2f}",
         "",
-        "Components:",
+        "Six Lenses Summary:",
     ]
+    
+    # Group by lens category
+    lens_categories = {
+        "Sub-Surface Operations": ["Work Over", "Well Services", "Well Stimulation", "Major Maintenance Underwater", "Operations Manpower", "Special Studies"],
+        "Surface Routine Operations": ["Operations", "Gas Royalty", "Miscellaneous", "Technology (Desander, etc)"],
+        "Maintenance": ["Major Maintenance Topside", "Major Maintenance (Onshore Terminal)"],
+        "Logistics": ["Vessel Operations", "Helicopter Operations", "Fixed Wings Operations", "Land Transport", "Base/Warehouse Operations"],
+        "General Overhead": ["Admin & Support (Non-Technical)", "Corporate Charges", "Rental", "Administrative Utilities", "Insurance"],
+        "Other Production Ops": ["Processing Fee Income", "Tariff [SST]", "Pipeline Tariff", "Facilities Charges", "Other Prod Operations Costs"]
+    }
+    
+    for category, subcategories in lens_categories.items():
+        total_category = 0
+        for sub in subcategories:
+            if sub in comps_df.columns:
+                total_category += comps_df[sub].sum()
+        if total_category > 0:
+            lines.append(f"• {category}: {currency} {total_category:,.2f}")
+    
+    lines.append("")
+    lines.append("Components:")
     for c in comps:
         lines.append(f"• {c['component_type']}: {currency} {c['breakdown']['grand_total']:,.2f}")
 
     for i, line in enumerate(lines):
         para = body.paragraphs[0] if i == 0 else body.add_paragraph()
         para.text = line
-        para.font.size = Pt(16)
+        para.font.size = Pt(14)
 
     if not comps_df.empty:
+        # Grand Total by Component chart
         fig, ax = plt.subplots(figsize=(7, 4))
         ax.bar(comps_df["Component"], comps_df["Grand Total"])
         ax.set_title("Grand Total by Component")
@@ -528,30 +694,46 @@ def create_project_pptx_report_OPEX(project_name, proj, currency=""):
         slide.shapes.title.text = "Grand Total by Component"
         slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
-        fig2, ax2 = plt.subplots(figsize=(7, 4))
+        # Cost Composition by Component (Six Lenses + Standard)
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
         labels = comps_df["Component"]
-        base = comps_df["Base OPEX"]
-        owners = comps_df["Owner's Cost"]
-        cont = comps_df["Contingency"]
-        esc = comps_df["Escalation"]
-        sst = comps_df["SST"]
-
+        
+        # Get lens columns for stacking
+        lens_cols = [col for col in lens_columns if col in comps_df.columns]
+        
+        # Start with Base OPEX
         bottom = np.zeros(len(labels))
-        for vals, lab in [
-            (base, "Base OPEX"),
-            (owners, "Owner"),
-            (cont, "Contingency"),
-            (esc, "Escalation"),
-            (sst, "SST"),
+        base_opex = comps_df["Base OPEX"]
+        ax2.bar(labels, base_opex, bottom=bottom, label="Base OPEX")
+        bottom += np.array(base_opex)
+        
+        # Add standard financials
+        for lab, col in [
+            ("Owner", "Owner's Cost"),
+            ("Contingency", "Contingency"),
+            ("Escalation", "Escalation"),
         ]:
-            ax2.bar(labels, vals, bottom=bottom, label=lab)
-            bottom += np.array(vals)
+            if col in comps_df.columns:
+                vals = comps_df[col]
+                ax2.bar(labels, vals, bottom=bottom, label=lab)
+                bottom += np.array(vals)
+        
+        # Add lens costs (grouped by category)
+        for category, subcategories in lens_categories.items():
+            category_total = np.zeros(len(labels))
+            for sub in subcategories:
+                if sub in comps_df.columns:
+                    category_total += np.array(comps_df[sub])
+            
+            if np.sum(category_total) > 0:
+                ax2.bar(labels, category_total, bottom=bottom, label=category)
+                bottom += category_total
 
-        ax2.set_title("Cost Composition by Component")
+        ax2.set_title("Cost Composition by Component (Six Lenses Analysis)")
         ax2.set_ylabel(f"Cost ({currency})".strip())
         ax2.tick_params(axis="x", rotation=25)
         ax2.grid(axis="y", linestyle="--", alpha=0.4)
-        ax2.legend(fontsize=8, ncol=3)
+        ax2.legend(fontsize=7, ncol=2, loc='upper left', bbox_to_anchor=(0, 1))
         fig2.tight_layout()
 
         img_stream2 = io.BytesIO()
@@ -560,8 +742,8 @@ def create_project_pptx_report_OPEX(project_name, proj, currency=""):
         img_stream2.seek(0)
 
         slide2 = prs.slides.add_slide(layout_title_only)
-        slide2.shapes.title.text = "Cost Composition by Component"
-        slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
+        slide2.shapes.title.text = "Cost Composition by Component (Six Lenses)"
+        slide2.shapes.add_picture(img_stream2, Inches(0.5), Inches(1.5), width=Inches(9))
 
     output = io.BytesIO()
     prs.save(output)
@@ -579,8 +761,8 @@ def create_comparison_excel_report_OPEX(projects_dict, currency=""):
         owners = dfc["Owner's Cost"].sum() if not dfc.empty else 0.0
         cont = dfc["Contingency"].sum() if not dfc.empty else 0.0
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
-        sst = dfc["SST"].sum() if not dfc.empty else 0.0
-        grand = dfc["Grand Total"].sum() if not dfc.empty else 0.0
+        grand_total = dfc["Grand Total"].sum() if not dfc.empty else 0.0
+
         summary_rows.append(
             {
                 "Project": name,
@@ -589,8 +771,7 @@ def create_comparison_excel_report_OPEX(projects_dict, currency=""):
                 "Owner": owners,
                 "Contingency": cont,
                 "Escalation": esc,
-                "SST": sst,
-                "Grand Total": grand,
+                "Grand Total": grand_total,
             }
         )
 
@@ -622,7 +803,7 @@ def create_comparison_excel_report_OPEX(projects_dict, currency=""):
 
         chart = BarChart()
         chart.title = "Grand Total by Project"
-        data = Reference(ws, min_col=8, max_col=8, min_row=1, max_row=max_row)
+        data = Reference(ws, min_col=7, max_col=7, min_row=1, max_row=max_row)
         cats = Reference(ws, min_col=1, min_row=2, max_row=max_row)
         chart.add_data(data, titles_from_data=True)
         chart.set_categories(cats)
@@ -652,7 +833,7 @@ def create_comparison_pptx_report_OPEX(projects_dict, currency=""):
 
     slide = prs.slides.add_slide(layout_title_only)
     title = slide.shapes.title
-    title.text = "OPEX Project Comparison"
+    title.text = "OPEX Project Comparison\n(Six Lenses Analysis)"
     p = title.text_frame.paragraphs[0]
     p.font.size = Pt(32)
     p.font.bold = True
@@ -665,8 +846,7 @@ def create_comparison_pptx_report_OPEX(projects_dict, currency=""):
         owners = dfc["Owner's Cost"].sum() if not dfc.empty else 0.0
         cont = dfc["Contingency"].sum() if not dfc.empty else 0.0
         esc = dfc["Escalation"].sum() if not dfc.empty else 0.0
-        sst = dfc["SST"].sum() if not dfc.empty else 0.0
-        grand = dfc["Grand Total"].sum() if not dfc.empty else 0.0
+        grand_total = dfc["Grand Total"].sum() if not dfc.empty else 0.0
         rows.append(
             {
                 "Project": name,
@@ -674,8 +854,7 @@ def create_comparison_pptx_report_OPEX(projects_dict, currency=""):
                 "Owner": owners,
                 "Contingency": cont,
                 "Escalation": esc,
-                "SST": sst,
-                "Grand Total": grand,
+                "Grand Total": grand_total,
             }
         )
     df_proj = pd.DataFrame(rows)
@@ -697,41 +876,6 @@ def create_comparison_pptx_report_OPEX(projects_dict, currency=""):
         slide = prs.slides.add_slide(layout_title_only)
         slide.shapes.title.text = "Grand Total by Project"
         slide.shapes.add_picture(img_stream, Inches(0.7), Inches(1.5), width=Inches(8.6))
-
-        fig2, ax2 = plt.subplots(figsize=(7, 4))
-        labels = df_proj["Project"]
-        base = df_proj["OPEX Sum"]
-        owners = df_proj["Owner"]
-        cont = df_proj["Contingency"]
-        esc = df_proj["Escalation"]
-        sst = df_proj["SST"]
-
-        bottom = np.zeros(len(labels))
-        for vals, lab in [
-            (base, "Base OPEX"),
-            (owners, "Owner"),
-            (cont, "Contingency"),
-            (esc, "Escalation"),
-            (sst, "SST"),
-        ]:
-            ax2.bar(labels, vals, bottom=bottom, label=lab)
-            bottom += np.array(vals)
-
-        ax2.set_title("Cost Composition by Project")
-        ax2.set_ylabel(f"Cost ({currency})".strip())
-        ax2.tick_params(axis="x", rotation=25)
-        ax2.grid(axis="y", linestyle="--", alpha=0.4)
-        ax2.legend(fontsize=8, ncol=3)
-        fig2.tight_layout()
-
-        img_stream2 = io.BytesIO()
-        fig2.savefig(img_stream2, format="png", dpi=200, bbox_inches="tight")
-        plt.close(fig2)
-        img_stream2.seek(0)
-
-        slide2 = prs.slides.add_slide(layout_title_only)
-        slide2.shapes.title.text = "Cost Composition by Project"
-        slide2.shapes.add_picture(img_stream2, Inches(0.7), Inches(1.5), width=Inches(8.6))
 
     output = io.BytesIO()
     prs.save(output)
@@ -1112,34 +1256,26 @@ with tab_data:
         X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
         target_column_pred = y_pred.name
 
-        st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
+        st.markdown('<h4 style="margin:0;color:#000;">Configuration (Six Lenses • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
 
-        c1, c2 = st.columns([1, 1])
+        # Six Lenses Configuration
+        st.markdown("#### Six Lenses Allocation (%)")
+        lenses = create_six_lenses_input_ui("pred")
+        
+        st.markdown("---")
+        st.markdown("#### Financial Adjustments (%)")
+        
+        c1, c2, c3 = st.columns(3)
         with c1:
-            st.markdown("**EPRR Breakdown (%)** (use +/-)")
-            eng = st.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0, step=1.0)
-            prep = st.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=7.0, step=1.0)
-            remv = st.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=54.0, step=1.0)
-            remd = st.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=27.0, step=1.0)
-
-            eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
-            eprr_total = sum(eprr.values())
-            st.caption(f"EPRR total: **{eprr_total:.2f}%**")
-
-            apply_norm = st.checkbox("Normalize EPRR to 100% for this run", value=False)
-            if apply_norm and eprr_total > 0 and abs(eprr_total - 100.0) > 1e-6:
-                eprr, _ = normalize_to_100(eprr)
-
-        with c2:
-            st.markdown("**Financial (%)** (use +/-)")
-            sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
             owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        with c2:
             cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
+        with c3:
             esc_pct = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5)
 
         st.markdown('<h4 style="margin:0;color:#000;">Predict (Single)</h4><p>Step 4</p>', unsafe_allow_html=True)
 
-        project_name = st.text_input("Project Name", placeholder="e.g., Offshore Pipeline Replacement 2025")
+        project_name = st.text_input("Project Name", placeholder="e.g., Offshore Platform OPEX 2026")
         st.caption("Provide feature values (leave blank for NaN).")
 
         cols_per_row = 3
@@ -1159,18 +1295,18 @@ with tab_data:
         if st.button("Run Prediction"):
             pred_val = single_prediction(X_pred, y_pred, new_data, dataset_name=ds_name_pred)
 
-            owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                pred_val, eprr, sst_pct, owners_pct, cont_pct, esc_pct
+            owners_cost, contingency_cost, escalation_cost, lens_costs, grand_total = cost_breakdown_six_lenses(
+                pred_val, lenses, owners_pct, cont_pct, esc_pct
             )
 
             result = {"Project Name": project_name}
             result.update({c: new_data.get(c, "") for c in cols_pred})
             result[target_column_pred] = round(pred_val, 2)
 
-            for k, v in eprr_costs.items():
-                result[f"{k} Cost"] = v
+            # Add all lens costs
+            for k, v in lens_costs.items():
+                result[k] = v
 
-            result["SST Cost"] = sst_cost
             result["Owner's Cost"] = owners_cost
             result["Cost Contingency"] = contingency_cost
             result["Escalation & Inflation"] = escalation_cost
@@ -1179,7 +1315,7 @@ with tab_data:
             st.session_state.predictions.setdefault(ds_name_pred, []).append(result)
             toast("Prediction added to Results.")
 
-            cA, cB, cC, cD, cE = st.columns(5)
+            cA, cB, cC, cD = st.columns(4)
             with cA:
                 st.metric("Predicted", f"{currency_pred} {pred_val:,.2f}")
             with cB:
@@ -1187,8 +1323,6 @@ with tab_data:
             with cC:
                 st.metric("Contingency", f"{currency_pred} {contingency_cost:,.2f}")
             with cD:
-                st.metric("Escalation", f"{currency_pred} {escalation_cost:,.2f}")
-            with cE:
                 st.metric("Grand Total", f"{currency_pred} {grand_total:,.2f}")
 
         st.markdown('<h4 style="margin:0;color:#000;">Batch (Excel)</h4>', unsafe_allow_html=True)
@@ -1207,17 +1341,17 @@ with tab_data:
                     for i, row in batch_df.iterrows():
                         name = row.get("Project Name", f"Project {i+1}")
 
-                        owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                            float(preds[i]), eprr, sst_pct, owners_pct, cont_pct, esc_pct
+                        owners_cost, contingency_cost, escalation_cost, lens_costs, grand_total = cost_breakdown_six_lenses(
+                            float(preds[i]), lenses, owners_pct, cont_pct, esc_pct
                         )
 
                         entry = {"Project Name": name}
                         entry.update(row[X_pred.columns].to_dict())
                         entry[target_column_pred] = round(float(preds[i]), 2)
 
-                        for k, v in eprr_costs.items():
-                            entry[f"{k} Cost"] = v
-                        entry["SST Cost"] = sst_cost
+                        # Add all lens costs
+                        for k, v in lens_costs.items():
+                            entry[k] = v
                         entry["Owner's Cost"] = owners_cost
                         entry["Cost Contingency"] = contingency_cost
                         entry["Escalation & Inflation"] = escalation_cost
@@ -1343,28 +1477,21 @@ with tab_pb:
                             comp_inputs[col_name] = st.text_input(col_name, key=key)
 
             st.markdown("---")
-            st.markdown("**Cost Percentage Inputs**")
-            cp1, cp2 = st.columns(2)
-            with cp1:
-                st.markdown("EPRR (%) — use +/-")
-                eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
-                prep_pb = st.number_input("Preparation", 0.0, 100.0, 7.0, 1.0, key=f"pb_prep_{proj_sel}")
-                remv_pb = st.number_input("Removal", 0.0, 100.0, 54.0, 1.0, key=f"pb_remv_{proj_sel}")
-                remd_pb = st.number_input("Remediation", 0.0, 100.0, 27.0, 1.0, key=f"pb_remd_{proj_sel}")
-
-                eprr_pb = {"Engineering": eng_pb, "Preparation": prep_pb, "Removal": remv_pb, "Remediation": remd_pb}
-                eprr_total_pb = sum(eprr_pb.values())
-                st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
-                apply_norm_pb = st.checkbox("Normalize to 100% for this component", value=False, key=f"pb_norm_{proj_sel}")
-                if apply_norm_pb and eprr_total_pb > 0 and abs(eprr_total_pb - 100.0) > 1e-6:
-                    eprr_pb, _ = normalize_to_100(eprr_pb)
-
-            with cp2:
-                st.markdown("Financial (%) — use +/-")
-                sst_pb = st.number_input("SST", 0.0, 100.0, 0.0, 0.5, key=f"pb_sst_{proj_sel}")
-                owners_pb = st.number_input("Owner's Cost", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
-                cont_pb = st.number_input("Contingency", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
-                esc_pb = st.number_input("Escalation & Inflation", 0.0, 100.0, 0.0, 0.5, key=f"pb_esc_{proj_sel}")
+            st.markdown("**Six Lenses Configuration**")
+            
+            # Six Lenses input for project builder
+            lenses_pb = create_six_lenses_input_ui(f"pb_{proj_sel}")
+            
+            st.markdown("---")
+            st.markdown("**Financial Adjustments**")
+            
+            fp1, fp2, fp3 = st.columns(3)
+            with fp1:
+                owners_pb = st.number_input("Owner's Cost (%)", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
+            with fp2:
+                cont_pb = st.number_input("Contingency (%)", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
+            with fp3:
+                esc_pb = st.number_input("Escalation & Inflation (%)", 0.0, 100.0, 0.0, 0.5, key=f"pb_esc_{proj_sel}")
 
             if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
                 row_payload = {}
@@ -1381,8 +1508,8 @@ with tab_pb:
                 try:
                     base_pred = single_prediction(X_comp, y_comp, row_payload, dataset_name=dataset_for_comp)
 
-                    owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                        base_pred, eprr_pb, sst_pb, owners_pb, cont_pb, esc_pb
+                    owners_cost, contingency_cost, escalation_cost, lens_costs, grand_total = cost_breakdown_six_lenses(
+                        base_pred, lenses_pb, owners_pb, cont_pb, esc_pb
                     )
 
                     _, best_name = get_trained_model_for_dataset(X_comp, y_comp, dataset_name=dataset_for_comp)
@@ -1394,9 +1521,8 @@ with tab_pb:
                         "inputs": {k: row_payload[k] for k in feat_cols},
                         "prediction": base_pred,
                         "breakdown": {
-                            "eprr_costs": eprr_costs,
-                            "eprr_pct": eprr_pb,
-                            "sst_cost": sst_cost,
+                            "lens_costs": lens_costs,
+                            "lenses_pct": lenses_pb,
                             "owners_cost": owners_cost,
                             "contingency_cost": contingency_cost,
                             "escalation_cost": escalation_cost,
@@ -1408,7 +1534,7 @@ with tab_pb:
                     st.session_state.projects[proj_sel]["components"].append(comp_entry)
                     st.session_state.component_labels[dataset_for_comp] = component_type or default_label
 
-                    # Currency for project should follow dataset currency (USD if last target col is USD)
+                    # Currency for project should follow dataset currency
                     st.session_state.projects[proj_sel]["currency"] = currency_ds
 
                     toast(f"Component added to project '{proj_sel}'.")
@@ -1452,7 +1578,6 @@ with tab_pb:
                             "Owner": float(c["breakdown"]["owners_cost"]),
                             "Contingency": float(c["breakdown"]["contingency_cost"]),
                             "Escalation": float(c["breakdown"]["escalation_cost"]),
-                            "SST": float(c["breakdown"]["sst_cost"]),
                         }
                     )
                 df_cost = pd.DataFrame(comp_cost_rows)
@@ -1549,7 +1674,6 @@ with tab_compare:
                 owners = float(dfc["Owner's Cost"].sum()) if not dfc.empty else 0.0
                 cont = float(dfc["Contingency"].sum()) if not dfc.empty else 0.0
                 esc = float(dfc["Escalation"].sum()) if not dfc.empty else 0.0
-                sst = float(dfc["SST"].sum()) if not dfc.empty else 0.0
                 grand_total = float(dfc["Grand Total"].sum()) if not dfc.empty else 0.0
 
                 proj["totals"] = {"OPEX_sum": OPEX, "grand_total": grand_total}
@@ -1561,7 +1685,6 @@ with tab_compare:
                         "Owner": owners,
                         "Contingency": cont,
                         "Escalation": esc,
-                        "SST": sst,
                         "Grand Total": grand_total,
                         "Currency": proj.get("currency", ""),
                     }
@@ -1584,7 +1707,7 @@ with tab_compare:
             st.markdown("#### Stacked Cost Composition by Project")
             df_melt = df_proj.melt(
                 id_vars=["Project"],
-                value_vars=["OPEX Sum", "Owner", "Contingency", "Escalation", "SST"],
+                value_vars=["OPEX Sum", "Owner", "Contingency", "Escalation"],
                 var_name="Cost Type",
                 value_name="Value",
             )
@@ -1600,8 +1723,8 @@ with tab_compare:
                 with st.expander(f"Project: {p}"):
                     rows_c = []
                     for c in comps:
-                        eprr_costs = c["breakdown"].get("eprr_costs", {})
-                        eprr_str = ", ".join(f"{k}: {v:,.0f}" for k, v in eprr_costs.items() if float(v) != 0)
+                        lens_costs = c["breakdown"].get("lens_costs", {})
+                        lens_str = ", ".join(f"{k}: {v:,.0f}" for k, v in lens_costs.items() if float(v) != 0)
                         rows_c.append(
                             {
                                 "Component": c["component_type"],
@@ -1610,9 +1733,8 @@ with tab_compare:
                                 "Owner": c["breakdown"]["owners_cost"],
                                 "Contingency": c["breakdown"]["contingency_cost"],
                                 "Escalation": c["breakdown"]["escalation_cost"],
-                                "SST": c["breakdown"]["sst_cost"],
                                 "Grand Total": c["breakdown"]["grand_total"],
-                                "EPRR Costs": eprr_str,
+                                "Lens Costs": lens_str,
                             }
                         )
                     df_compd = pd.DataFrame(rows_c)
@@ -1623,7 +1745,6 @@ with tab_compare:
                                 "Owner": "{:,.2f}",
                                 "Contingency": "{:,.2f}",
                                 "Escalation": "{:,.2f}",
-                                "SST": "{:,.2f}",
                                 "Grand Total": "{:,.2f}",
                             }
                         ),
