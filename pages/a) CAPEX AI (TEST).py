@@ -1695,10 +1695,10 @@ with tab_pb:
     comp_payload = comp_edited.iloc[0].to_dict()
 
     st.markdown("---")
-    st.markdown("**Cost Percentage Inputs**")
+    st.markdown("**WBS Level 1**")
     cp1, cp2 = st.columns(2)
     with cp1:
-        st.markdown("EPRR (%) — use +/-")
+        st.markdown("use +/-")
         eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
         procurement_pb = st.number_input("Procurement", 0.0, 100.0, 33.0, 1.0, key=f"pb_procurement_{proj_sel}")
         fabrication_pb = st.number_input("Fabrication/Construction", 0.0, 100.0, 33.0, 1.0, key=f"pb_fabrication_{proj_sel}")
@@ -1709,7 +1709,7 @@ with tab_pb:
         st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
 
     with cp2:
-        st.markdown("Financial (%) — use +/-")
+        st.markdown("use +/-")
         sst_pb = st.number_input("SST", 0.0, 100.0, 0.0, 0.5, key=f"pb_sst_{proj_sel}")
         owners_pb = st.number_input("Owner's Cost", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
         cont_pb = st.number_input("Contingency", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
@@ -2433,4 +2433,5 @@ with tab_compare:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             key="cmp_dl_ppt",
         )
+
 
