@@ -956,18 +956,13 @@ with tab_data:
     c1, c2 = st.columns([1, 1])
     with c1:
         st.markdown("**EPRR Breakdown (%)** (use +/-)")
-        eng = st.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0, step=1.0, key="pred_eng")
-        prep = st.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=7.0, step=1.0, key="pred_prep")
-        remv = st.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=54.0, step=1.0, key="pred_remv")
-        remd = st.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=27.0, step=1.0, key="pred_remd")
+        procurement = st.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_procurement")
+        fabrication = st.number_input("Fabrication/Construction (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_fabrication")
+        ti = st.number_input("Transportation & Installation (T&I) (%)", min_value=0.0, max_value=100.0, value=34.0, step=1.0, key="pred_ti")
 
-        eprr = {"Engineering": eng, "Preparation": prep, "Removal": remv, "Remediation": remd}
+        eprr = {"Procurement": procurement, "Fabrication/Construction": fabrication, "Transportation & Installation": ti}
         eprr_total = sum(eprr.values())
         st.caption(f"EPRR total: **{eprr_total:.2f}%**")
-
-        apply_norm = st.checkbox("Normalize EPRR to 100% for this run", value=False, key="pred_norm_eprr")
-        if apply_norm and eprr_total > 0 and abs(eprr_total - 100.0) > 1e-6:
-            eprr, _ = normalize_to_100(eprr)
 
     with c2:
         st.markdown("**Financial (%)** (use +/-)")
@@ -1703,17 +1698,13 @@ with tab_pb:
     cp1, cp2 = st.columns(2)
     with cp1:
         st.markdown("EPRR (%) — use +/-")
-        eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
-        prep_pb = st.number_input("Preparation", 0.0, 100.0, 7.0, 1.0, key=f"pb_prep_{proj_sel}")
-        remv_pb = st.number_input("Removal", 0.0, 100.0, 54.0, 1.0, key=f"pb_remv_{proj_sel}")
-        remd_pb = st.number_input("Remediation", 0.0, 100.0, 27.0, 1.0, key=f"pb_remd_{proj_sel}")
+        procurement_pb = st.number_input("Procurement", 0.0, 100.0, 33.0, 1.0, key=f"pb_procurement_{proj_sel}")
+        fabrication_pb = st.number_input("Fabrication/Construction", 0.0, 100.0, 33.0, 1.0, key=f"pb_fabrication_{proj_sel}")
+        ti_pb = st.number_input("Transportation & Installation (T&I)", 0.0, 100.0, 34.0, 1.0, key=f"pb_ti_{proj_sel}")
 
-        eprr_pb = {"Engineering": eng_pb, "Preparation": prep_pb, "Removal": remv_pb, "Remediation": remd_pb}
+        eprr_pb = {"Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
         eprr_total_pb = sum(eprr_pb.values())
         st.caption(f"EPRR total: **{eprr_total_pb:.2f}%**")
-        apply_norm_pb = st.checkbox("Normalize to 100% for this component", value=False, key=f"pb_norm_{proj_sel}")
-        if apply_norm_pb and eprr_total_pb > 0 and abs(eprr_total_pb - 100.0) > 1e-6:
-            eprr_pb, _ = normalize_to_100(eprr_pb)
 
     with cp2:
         st.markdown("Financial (%) — use +/-")
