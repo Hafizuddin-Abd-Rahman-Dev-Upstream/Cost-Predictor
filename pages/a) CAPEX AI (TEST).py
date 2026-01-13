@@ -952,10 +952,10 @@ with tab_data:
     st.session_state[f"target_col__{ds_name_pred}"] = target_col_pred
     currency_pred = get_currency_symbol(df_pred, target_col_pred)
 
-    st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 1</p>', unsafe_allow_html=True)
+    st.markdown('<h4 style="margin:0;color:#000;">WBS Level 1</h4><p>Step 1</p>', unsafe_allow_html=True)
     c1, c2 = st.columns([1, 1])
     with c1:
-        st.markdown("**EPRR Breakdown (%)** (use +/-)")
+        st.markdown("(use +/-)")
         eng = st.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0, step=1.0, key="pred_eng")
         procurement = st.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_procurement")
         fabrication = st.number_input("Fabrication/Construction (%)", min_value=0.0, max_value=100.0, value=33.0, step=1.0, key="pred_fabrication")
@@ -963,10 +963,10 @@ with tab_data:
 
         eprr = {"Engineering": eng, "Procurement": procurement, "Fabrication/Construction": fabrication, "Transportation & Installation": ti}
         eprr_total = sum(eprr.values())
-        st.caption(f"EPRR total: **{eprr_total:.2f}%**")
+        st.caption(f" total: **{eprr_total:.2f}%**")
 
     with c2:
-        st.markdown("**Financial (%)** (use +/-)")
+        st.markdown("(use +/-)")
         sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_sst")
         owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_owner")
         cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_cont")
@@ -2433,3 +2433,4 @@ with tab_compare:
             mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
             key="cmp_dl_ppt",
         )
+
