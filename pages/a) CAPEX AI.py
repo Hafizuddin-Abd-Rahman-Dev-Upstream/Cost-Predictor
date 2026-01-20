@@ -224,15 +224,28 @@ def main():
     st.subheader(f"📊 Metrics: {clean_name}")
 
     currency = get_currency_symbol(df)
+    
+    # Store the first column separately for project names
+    project_names = df.iloc[:, 0] if len(df.columns) > 0 else pd.Series()
+    
+    # Use all columns except the first one for the model
+    # The last column is still the target, but now we start from column 1
+    df_model = df.iloc[:, 1:] if len(df.columns) > 1 else df
+    
     imputer = KNNImputer(n_neighbors=5)
-    df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+    df_imputed = pd.DataFrame(imputer.fit_transform(df_model), columns=df_model.columns)
     
     # Minimized collapse for Data Overview
     with st.expander('Data Overview', expanded=False):
         st.header('Data Overview')
-        st.write('Dataset Shape:', df_imputed.shape)
-        st.dataframe(df_imputed.head())
+        # Reconstruct full dataframe with project names for display
+        df_display = pd.concat([project_names.reset_index(drop=True), df_imputed], axis=1)
+        df_display.columns = [df.columns[0]] + list(df_imputed.columns)
+        st.write('Dataset Shape:', df_display.shape)
+        st.dataframe(df_display.head())
 
+    # X includes all columns except the first (project name) and the last (target)
+    # y is still the last column
     X = df_imputed.iloc[:, :-1]
     y = df_imputed.iloc[:, -1]
     target_column = y.name
@@ -261,8 +274,11 @@ def main():
         st.subheader('Correlation Matrix')
         feature_count = len(X.columns)
         corr_height = min(9, max(7, feature_count * 0.5))
+        
+        # Create correlation matrix from the imputed data
+        df_for_corr = pd.concat([X, y], axis=1)
         fig, ax = plt.subplots(figsize=(8, corr_height))
-        sns.heatmap(df_imputed.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
+        sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
         plt.tight_layout()
         st.pyplot(fig)
         plt.close()
@@ -409,35 +425,55 @@ def main():
         file_id = f"{excel_file.name}_{excel_file.size}_{selected_dataset_name}"
         if file_id not in st.session_state['processed_excel_files']:
             batch_df = pd.read_excel(excel_file)
-            if set(X.columns).issubset(batch_df.columns):
-                scaled = scaler.transform(batch_df[X.columns])
-                preds = rf_model.predict(scaled)
-                batch_df[target_column] = preds
-                for i, row in batch_df.iterrows():
-                    name = row.get("Project Name", f"Project {i+1}")
-                    entry = {'Project Name': name}
-                    entry.update(row[X.columns].to_dict())
-                    entry[target_column] = round(preds[i], 2)
-                    for phase, percent in epcic_percentages.items():
-                        cost = round(preds[i] * (percent / 100), 2)
-                        entry[f"{phase} Cost"] = cost
-                    predev_cost = round(preds[i] * (predev_percentage / 100), 2)
-                    owners_cost = round(preds[i] * (owners_percentage / 100), 2)
-                    entry["Pre-Development Cost"] = predev_cost
-                    entry["Owner's Cost"] = owners_cost
-                    contingency_base = preds[i] + owners_cost
-                    contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
-                    entry["Cost Contingency"] = contingency_cost
-                    escalation_base = preds[i] + owners_cost
-                    escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
-                    entry["Escalation & Inflation"] = escalation_cost
-                    grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
-                    entry["Grand Total"] = grand_total
-                    st.session_state['predictions'][selected_dataset_name].append(entry)
-                st.session_state['processed_excel_files'].add(file_id)
-                st.success("Batch prediction successful!")
+            
+            # Skip the first column (assuming it's project names/identifiers)
+            if len(batch_df.columns) > 1:
+                batch_features = batch_df.iloc[:, 1:]  # Skip first column
+                # Ensure we have the right columns for prediction
+                if set(X.columns).issubset(batch_features.columns):
+                    scaled = scaler.transform(batch_features[X.columns])
+                    preds = rf_model.predict(scaled)
+                    
+                    for i, row in batch_df.iterrows():
+                        # Use the first column as project name
+                        name = row.iloc[0] if not pd.isna(row.iloc[0]) else f"Project {i+1}"
+                        entry = {'Project Name': str(name)}
+                        
+                        # Add the feature values (skip the first column)
+                        for feature in X.columns:
+                            entry[feature] = row[feature] if feature in row else np.nan
+                        
+                        entry[target_column] = round(preds[i], 2)
+                        
+                        # Add cost breakdown
+                        for phase, percent in epcic_percentages.items():
+                            cost = round(preds[i] * (percent / 100), 2)
+                            entry[f"{phase} Cost"] = cost
+                        
+                        predev_cost = round(preds[i] * (predev_percentage / 100), 2)
+                        owners_cost = round(preds[i] * (owners_percentage / 100), 2)
+                        entry["Pre-Development Cost"] = predev_cost
+                        entry["Owner's Cost"] = owners_cost
+                        
+                        contingency_base = preds[i] + owners_cost
+                        contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
+                        entry["Cost Contingency"] = contingency_cost
+                        
+                        escalation_base = preds[i] + owners_cost
+                        escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
+                        entry["Escalation & Inflation"] = escalation_cost
+                        
+                        grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
+                        entry["Grand Total"] = grand_total
+                        
+                        st.session_state['predictions'][selected_dataset_name].append(entry)
+                    
+                    st.session_state['processed_excel_files'].add(file_id)
+                    st.success("Batch prediction successful!")
+                else:
+                    st.error(f"Excel missing required columns. Needed: {list(X.columns)}")
             else:
-                st.error("Excel missing required columns.")
+                st.error("Excel file must have at least 2 columns (project name + features)")
 
     with st.expander('Simplified Project List', expanded=True):
         preds = st.session_state['predictions'][selected_dataset_name]
@@ -479,27 +515,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
