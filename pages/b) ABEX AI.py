@@ -313,13 +313,13 @@ def main():
     # Cost Breakdown Configuration - collapsed by default
     with st.expander('Cost Breakdown Configuration', expanded=False):
         st.subheader("🔧 Cost Breakdown Percentage Input")
-        st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
+        st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable. Below is the recommended percentage breakdown.")
         eprr_percentages = {}
         col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
-        eprr_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=12.0)
-        eprr_percentages["Preparation"] = col_ep2.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=7.0)
+        eprr_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=14.0)
+        eprr_percentages["Preparation"] = col_ep2.number_input("Preparation (%)", min_value=0.0, max_value=100.0, value=6.0)
         eprr_percentages["Removal"] = col_ep3.number_input("Removal (%)", min_value=0.0, max_value=100.0, value=54.0)
-        eprr_percentages["Remediation"] = col_ep4.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=27.0)
+        eprr_percentages["Remediation"] = col_ep4.number_input("Remediation (%)", min_value=0.0, max_value=100.0, value=26.0)
         col_ep5.write("")
         eprr_total = sum(eprr_percentages.values())
         if abs(eprr_total - 100.0) > 1e-3 and eprr_total > 0:
