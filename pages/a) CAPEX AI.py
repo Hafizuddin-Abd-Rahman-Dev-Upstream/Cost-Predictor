@@ -240,7 +240,6 @@ def main():
         st.header('Data Overview')
         # Show only the modeling data (without project names)
         st.write('Dataset Shape:', df_imputed.shape)
-        st.write('**Note:** Project names are excluded from this overview for confidentiality.')
         st.dataframe(df_imputed.head())
 
     # X includes all columns except the first (project name) and the last (target)
@@ -514,3 +513,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
