@@ -240,7 +240,7 @@ def main():
         st.header('Data Overview')
         # Reconstruct full dataframe with project names for display
         df_display = pd.concat([project_names.reset_index(drop=True), df_imputed], axis=1)
-        df_display.columns = [df.columns[0]] + list(df_imputed.columns)
+        df_display.columns = [df.columns[1]] + list(df_imputed.columns)
         st.write('Dataset Shape:', df_display.shape)
         st.dataframe(df_display.head())
 
@@ -515,3 +515,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
