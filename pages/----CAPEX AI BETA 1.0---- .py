@@ -698,8 +698,8 @@ def main():
     with tab_pb:
         st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
 
-        if not st.session_state.datasets:
-            st.info("No dataset. Go to **Data** tab to upload or load.")
+        if not st.session_state['datasets']:
+            st.info("Please upload one or more CSV files in the Data tab to begin.")
             st.stop()
 
         colA, colB = st.columns([2, 1])
@@ -1055,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
