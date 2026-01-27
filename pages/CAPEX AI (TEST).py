@@ -23,10 +23,6 @@ import requests
 import numpy as np
 import pandas as pd
 import streamlit as st
-import datetime
-import csv
-import os
-from pathlib import Path
 
 # --- Guard: scikit-learn missing (prevents hard crash on Streamlit Cloud) ---
 try:
@@ -98,74 +94,6 @@ SHAREPOINT_LINKS = {
     "Uncon": "https://petronas.sharepoint.com/sites/your-site/uncon",
     "CCS": "https://petronas.sharepoint.com/sites/your-site/ccs",
 }
-
-# ---------------------------------------------------------------------------------------
-# LOGGING CONFIGURATION
-# ---------------------------------------------------------------------------------------
-LOG_FILE_PATH = "pages/data_CAPEX/login_logs.csv"
-
-def log_login_attempt(email, success, ip_address=None, user_agent=None):
-    """Log login attempts to CSV file"""
-    try:
-        # Create logs directory if it doesn't exist
-        log_dir = os.path.dirname(LOG_FILE_PATH)
-        if log_dir and not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-        
-        # Get client info
-        try:
-            # Try to get IP from Streamlit context
-            from streamlit.web.server.websocket_headers import _get_websocket_headers
-            headers = _get_websocket_headers()
-            ip_address = headers.get("X-Forwarded-For", "Unknown").split(",")[0] if headers else "Unknown"
-            user_agent = headers.get("User-Agent", "Unknown") if headers else "Unknown"
-        except:
-            ip_address = ip_address or "Unknown"
-            user_agent = user_agent or "Unknown"
-        
-        # Create log entry
-        log_entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "email": email,
-            "success": "SUCCESS" if success else "FAILED",
-            "ip_address": ip_address,
-            "user_agent": user_agent
-        }
-        
-        # Write to CSV
-        file_exists = os.path.isfile(LOG_FILE_PATH)
-        
-        with open(LOG_FILE_PATH, "a", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=["timestamp", "email", "success", "ip_address", "user_agent"])
-            if not file_exists:
-                writer.writeheader()
-            writer.writerow(log_entry)
-            
-        return True
-    except Exception as e:
-        print(f"Logging failed: {e}")
-        return False
-
-def get_login_logs():
-    """Read login logs from CSV file"""
-    try:
-        if os.path.exists(LOG_FILE_PATH):
-            df = pd.read_csv(LOG_FILE_PATH)
-            return df
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"Error reading logs: {e}")
-        return pd.DataFrame()
-
-def clear_login_logs():
-    """Clear all login logs (admin only)"""
-    try:
-        if os.path.exists(LOG_FILE_PATH):
-            os.remove(LOG_FILE_PATH)
-        return True
-    except Exception as e:
-        print(f"Error clearing logs: {e}")
-        return False
 
 # ---------------------------------------------------------------------------------------
 # GLOBAL CSS
@@ -309,13 +237,8 @@ st.markdown(
 # ---------------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
-if "user_email" not in st.session_state:
-    st.session_state.user_email = None
-if "is_admin" not in st.session_state:
-    st.session_state.is_admin = False
 
 APPROVED_EMAILS = [str(e).strip().lower() for e in st.secrets.get("emails", [])]
-ADMIN_EMAILS = [str(e).strip().lower() for e in st.secrets.get("admin_emails", [])]
 correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
@@ -327,14 +250,8 @@ if not st.session_state.authenticated:
 
         if submitted:
             ok = (email in APPROVED_EMAILS) and (password == correct_password)
-            
-            # Log the attempt
-            log_login_attempt(email, ok)
-            
             if ok:
                 st.session_state.authenticated = True
-                st.session_state.user_email = email
-                st.session_state.is_admin = email in ADMIN_EMAILS
                 st.success("✅ Access granted.")
                 st.rerun()
             else:
@@ -779,24 +696,15 @@ for col, label in zip(nav_cols, nav_labels):
 # ---------------------------------------------------------------------------------------
 # TOP-LEVEL TABS
 # ---------------------------------------------------------------------------------------
-# Create tabs list conditionally based on admin status
-tab_names = ["📊 Data", "🏗️ Project Builder", "🎲 Monte Carlo", "🔀 Compare Projects"]
-if st.session_state.is_admin:
-    tab_names.append("🔒 Admin Logs")
-
-tabs = st.tabs(tab_names)
-
-# Unpack tabs based on what's available
-if st.session_state.is_admin:
-    tab_data, tab_pb, tab_mc, tab_compare, tab_admin = tabs
-else:
-    tab_data, tab_pb, tab_mc, tab_compare = tabs
+tab_data, tab_pb, tab_mc, tab_compare = st.tabs(
+    ["📊 Data", "🏗️ Project Builder", "🎲 Monte Carlo", "🔀 Compare Projects"]
+)
 
 # =======================================================================================
 # DATA TAB
 # =======================================================================================
 with tab_data:
-    st.markdown('<h3 style="margin-top:0;color:#000;">📊 Data</h3>', unsafe_allow_html=True)
+    st.markdown('<h3 style="margin-top:0;color:#000;">📁 Data</h3>', unsafe_allow_html=True)
 
     st.markdown('<h4 style="margin:0;color:#000;">Data Sources</h4><p></p>', unsafe_allow_html=True)
     c1, c2 = st.columns([1.2, 1])
@@ -2527,180 +2435,3 @@ with tab_compare:
         )
 
 
-# =======================================================================================
-# ADMIN LOGS TAB (Admin Only)
-# =======================================================================================
-if st.session_state.is_admin:
-    with tab_admin:
-        st.markdown('<h3 style="margin-top:0;color:#000;">🔒 Admin Login Logs</h3>', unsafe_allow_html=True)
-        st.caption(f"Logged in as: {st.session_state.user_email} (Admin)")
-        
-        # Add some stats
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("🔄 Refresh Logs", key="refresh_logs_btn"):
-                st.rerun()
-        
-        with col2:
-            if st.button("📥 Download Logs", key="download_logs_btn"):
-                logs_df = get_login_logs()
-                if not logs_df.empty:
-                    csv = logs_df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="⬇️ Download CSV",
-                        data=csv,
-                        file_name=f"login_logs_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                        mime="text/csv",
-                        key="download_logs_csv"
-                    )
-        
-        with col3:
-            if st.button("🗑️ Clear All Logs", key="clear_logs_btn"):
-                if clear_login_logs():
-                    st.success("Logs cleared successfully.")
-                    st.rerun()
-                else:
-                    st.error("Failed to clear logs.")
-        
-        st.divider()
-        
-        # Display logs
-        logs_df = get_login_logs()
-        
-        if not logs_df.empty:
-            # Convert timestamp to datetime for sorting
-            logs_df['datetime'] = pd.to_datetime(logs_df['timestamp'])
-            logs_df = logs_df.sort_values('datetime', ascending=False)
-            
-            # Show summary stats
-            total_logs = len(logs_df)
-            successful_logins = len(logs_df[logs_df['success'] == 'SUCCESS'])
-            failed_logins = len(logs_df[logs_df['success'] == 'FAILED'])
-            
-            st.markdown(f"**Total Records:** {total_logs} | **Successful:** {successful_logins} | **Failed:** {failed_logins}")
-            
-            # Add filters
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                filter_status = st.selectbox("Filter by Status", ["All", "SUCCESS", "FAILED"])
-            with col_f2:
-                filter_email = st.text_input("Filter by Email", "")
-            
-            # Apply filters
-            filtered_df = logs_df.copy()
-            if filter_status != "All":
-                filtered_df = filtered_df[filtered_df['success'] == filter_status]
-            if filter_email:
-                filtered_df = filtered_df[filtered_df['email'].str.contains(filter_email, case=False, na=False)]
-            
-            # Display logs
-            st.markdown(f"**Showing {len(filtered_df)} records**")
-            st.dataframe(
-                filtered_df.drop('datetime', axis=1).reset_index(drop=True),
-                use_container_width=True,
-                height=400
-            )
-            
-            # Visualizations
-            st.markdown("### 📈 Login Statistics")
-            
-            # Create tabs for different visualizations
-            viz_tabs = st.tabs(["Timeline", "Status Breakdown", "Top Users"])
-            
-            with viz_tabs[0]:
-                # Timeline of login attempts
-                timeline_df = logs_df.copy()
-                timeline_df['date'] = timeline_df['datetime'].dt.date
-                daily_counts = timeline_df.groupby('date').size().reset_index(name='count')
-                
-                fig_timeline = px.line(daily_counts, x='date', y='count', 
-                                       title="Daily Login Attempts",
-                                       markers=True)
-                st.plotly_chart(fig_timeline, use_container_width=True)
-            
-            with viz_tabs[1]:
-                # Pie chart of success vs failure
-                status_counts = logs_df['success'].value_counts().reset_index()
-                status_counts.columns = ['status', 'count']
-                
-                fig_pie = px.pie(status_counts, values='count', names='status',
-                                title="Success vs Failed Login Attempts")
-                st.plotly_chart(fig_pie, use_container_width=True)
-            
-            with viz_tabs[2]:
-                # Top users by login attempts
-                user_counts = logs_df['email'].value_counts().head(10).reset_index()
-                user_counts.columns = ['email', 'count']
-                
-                fig_bar = px.bar(user_counts, x='email', y='count',
-                                title="Top 10 Users by Login Attempts",
-                                color='count')
-                fig_bar.update_layout(xaxis_title="Email", yaxis_title="Login Attempts")
-                st.plotly_chart(fig_bar, use_container_width=True)
-            
-            # Export options
-            st.divider()
-            st.markdown("### 📤 Export Options")
-            
-            export_col1, export_col2 = st.columns(2)
-            
-            with export_col1:
-                # JSON export
-                if st.button("Export as JSON"):
-                    json_data = filtered_df.drop('datetime', axis=1).to_json(orient='records', indent=2)
-                    st.download_button(
-                        label="⬇️ Download JSON",
-                        data=json_data,
-                        file_name=f"login_logs_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                        mime="application/json",
-                        key="download_logs_json"
-                    )
-            
-            with export_col2:
-                # Excel export
-                if st.button("Export as Excel"):
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        filtered_df.drop('datetime', axis=1).to_excel(writer, sheet_name='Login Logs', index=False)
-                    excel_buffer.seek(0)
-                    
-                    st.download_button(
-                        label="⬇️ Download Excel",
-                        data=excel_buffer,
-                        file_name=f"login_logs_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="download_logs_excel"
-                    )
-        else:
-            st.info("No login logs found.")
-            
-        # Real-time monitoring (optional)
-        st.divider()
-        with st.expander("⚡ Real-time Monitoring (Last 24 Hours)"):
-            if not logs_df.empty:
-                # Filter for last 24 hours
-                cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=24)
-                recent_logs = logs_df[logs_df['datetime'] > cutoff_time]
-                
-                if not recent_logs.empty:
-                    recent_failed = recent_logs[recent_logs['success'] == 'FAILED']
-                    
-                    col_mon1, col_mon2, col_mon3 = st.columns(3)
-                    with col_mon1:
-                        st.metric("Recent Attempts (24h)", len(recent_logs))
-                    with col_mon2:
-                        st.metric("Recent Failed", len(recent_failed))
-                    with col_mon3:
-                        st.metric("Success Rate", 
-                                 f"{(len(recent_logs) - len(recent_failed)) / len(recent_logs) * 100:.1f}%" 
-                                 if len(recent_logs) > 0 else "N/A")
-                    
-                    if not recent_failed.empty:
-                        st.warning(f"⚠️ {len(recent_failed)} failed login attempts in the last 24 hours")
-                        st.dataframe(recent_failed.drop('datetime', axis=1).reset_index(drop=True), 
-                                    use_container_width=True)
-                else:
-                    st.info("No login attempts in the last 24 hours.")
-            else:
-                st.info("No logs available for monitoring.")
