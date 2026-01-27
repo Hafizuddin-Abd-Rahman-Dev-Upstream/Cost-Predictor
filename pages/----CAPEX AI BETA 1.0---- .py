@@ -951,60 +951,29 @@ def main():
         
         dfc = pd.DataFrame(rows)
         
-        # Ensure column order matches Prediction Summary pattern
-        # In Prediction Summary, the order is: features, target, costs, grand total
+        # Simple column ordering - just put Component and Dataset first, Grand Total last
         if not dfc.empty:
-            # Define the logical order (matching Prediction Summary)
-            column_order = []
-            
-            # First: Component and Dataset (like Project Name in Data tab)
-            if "Component" in dfc.columns:
-                column_order.append("Component")
-            if "Dataset" in dfc.columns:
-                column_order.append("Dataset")
-            
-            # Second: All feature columns (excluding cost/total columns)
-            feature_columns = []
-            cost_keywords = ["Cost", "Total", "Contingency", "Escalation", "Development", "Owner"]
-            
-            for col in dfc.columns:
-                if col not in column_order:
-                    is_cost_column = any(keyword in col for keyword in cost_keywords)
-                    if not is_cost_column:
-                        feature_columns.append(col)
-            
-            column_order.extend(sorted(feature_columns))
-            
-            # Third: Target column (Base CAPEX)
-            target_col_name = None
-            for col in dfc.columns:
-                if col not in column_order and ("CAPEX" in col or col == breakdown.get("target_col", "")):
-                    target_col_name = col
-                    break
-            
-            if target_col_name and target_col_name in dfc.columns:
-                column_order.append(target_col_name)
-            
-            # Fourth: EPCIC costs in specific order
-            epcic_order = ["Engineering Cost", "Procurement Cost", "Construction Cost", 
-                          "Installation Cost", "Commissioning Cost"]
-            for epcic_col in epcic_order:
-                if epcic_col in dfc.columns:
-                    column_order.append(epcic_col)
-            
-            # Fifth: Other costs in specific order
-            other_costs_order = ["Pre-Development Cost", "Owner's Cost", 
-                                "Cost Contingency", "Escalation & Inflation"]
-            for cost_col in other_costs_order:
-                if cost_col in dfc.columns:
-                    column_order.append(cost_col)
-            
-            # Sixth: Grand Total at the end
-            if "Grand Total" in dfc.columns:
-                column_order.append("Grand Total")
-            
-            # Reorder the dataframe
-            dfc = dfc[column_order]
+            if "Component" in dfc.columns and "Grand Total" in dfc.columns:
+                # Get all columns
+                all_columns = list(dfc.columns)
+                
+                # Remove Component and Grand Total from the list
+                all_columns.remove("Component")
+                if "Dataset" in all_columns:
+                    all_columns.remove("Dataset")
+                if "Grand Total" in all_columns:
+                    all_columns.remove("Grand Total")
+                
+                # Create new order: Component, Dataset, other columns, Grand Total
+                new_order = ["Component"]
+                if "Dataset" in dfc.columns:
+                    new_order.append("Dataset")
+                new_order.extend(sorted(all_columns))
+                new_order.append("Grand Total")
+                
+                # Only use columns that exist
+                new_order = [col for col in new_order if col in dfc.columns]
+                dfc = dfc[new_order]
         
         # Optional: Reorder columns for better readability
         # Define the column order you want
@@ -1179,6 +1148,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
