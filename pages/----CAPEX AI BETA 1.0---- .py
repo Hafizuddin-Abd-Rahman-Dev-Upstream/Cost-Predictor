@@ -445,7 +445,7 @@ def main():
             
             # Create correlation matrix from the imputed data
             df_for_corr = pd.concat([X, y], axis=1)
-            fig, ax = plt.subplots(figsize=(6, corr_height))
+            fig, ax = plt.subplots(figsize=(6, corr_height * 0.7))
             sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
             plt.tight_layout()
             st.pyplot(fig)
@@ -1055,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
