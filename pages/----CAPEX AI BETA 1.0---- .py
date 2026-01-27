@@ -743,16 +743,19 @@ def main():
         comp_payload = comp_edited.iloc[0].to_dict()
 
         st.markdown("---")
-        # WBS Level 1 - EXACTLY like Cost Breakdown Configuration
-        with st.expander('📐 WBS Level 1 Configuration', expanded=False):
-            st.header('WBS Level 1 Configuration')
-            st.subheader("🔧 WBS Level 1 Percentage Input")
+        
+        # COST BREAKDOWN CONFIGURATION - EXACTLY like Data tab
+        with st.expander('Cost Breakdown Configuration', expanded=False):
+            st.header('Cost Breakdown Configuration')
+            
+            # WBS Level 1 Section - EXACTLY like Data tab
+            st.subheader("🔧 Cost Breakdown Percentage Input")
             st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
             
-            # Use 5 columns layout EXACTLY like Cost Breakdown Configuration
+            # Use 5 columns layout EXACTLY like Data tab
             wb1, wb2, wb3, wb4, wb5 = st.columns(5)
             
-            # Engineering input - EXACT SAME FORMAT
+            # Engineering input - EXACT SAME FORMAT as Data tab
             epcic_percentages = {}
             epcic_percentages["Engineering"] = wb1.number_input("Engineering (%)", 
                                                                 min_value=0.0, 
@@ -761,7 +764,7 @@ def main():
                                                                 step=1.0, 
                                                                 key=f"pb_eng_{proj_sel}")
             
-            # Procurement input - EXACT SAME FORMAT
+            # Procurement input - EXACT SAME FORMAT as Data tab
             epcic_percentages["Procurement"] = wb2.number_input("Procurement (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
@@ -769,23 +772,23 @@ def main():
                                                                 step=1.0, 
                                                                 key=f"pb_proc_{proj_sel}")
             
-            # Fabrication/Construction input - EXACT SAME FORMAT
-            epcic_percentages["Construction"] = wb3.number_input("Fabrication/Construction (%)", 
+            # Fabrication/Construction input - EXACT SAME FORMAT as Data tab
+            epcic_percentages["Construction"] = wb3.number_input("Construction (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=25.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_const_{proj_sel}")
             
-            # Transportation & Installation input - EXACT SAME FORMAT
-            epcic_percentages["Installation"] = wb4.number_input("Transportation & Installation (T&I) (%)", 
+            # Installation input - EXACT SAME FORMAT as Data tab
+            epcic_percentages["Installation"] = wb4.number_input("Installation (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=20.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_inst_{proj_sel}")
             
-            # Commissioning input - EXACT SAME FORMAT
+            # Commissioning input - EXACT SAME FORMAT as Data tab
             epcic_percentages["Commissioning"] = wb5.number_input("Commissioning (%)", 
                                                                  min_value=0.0, 
                                                                  max_value=100.0, 
@@ -793,38 +796,33 @@ def main():
                                                                  step=1.0, 
                                                                  key=f"pb_comm_{proj_sel}")
             
-            # Calculate and display total - EXACT SAME FORMAT
+            # Calculate and display total - EXACT SAME FORMAT as Data tab
             epcic_total = sum(epcic_percentages.values())
             if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
-                st.warning(f"⚠️ WBS Level 1 total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
+                st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
             
-            st.markdown("**For accurate WBS Level 1 breakdown, refer to project-specific engineering documents and standards.*")
-        
-        # Additional Cost Factors - EXACTLY like Cost Breakdown Configuration
-        with st.expander('💼 Additional Cost Factors Configuration', expanded=False):
-            st.header('Additional Cost Factors Configuration')
+            st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
             
-            # Pre-Dev and Owner's Cost - EXACT SAME FORMAT
+            # Pre-Dev and Owner's Cost - EXACT SAME FORMAT as Data tab
             st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
             st.markdown("")
             col_pd1, col_pd2 = st.columns(2)
             
-            # Note: In your Cost Breakdown, Pre-Development is called "Pre-Development"
-            # but in Project Builder you use "SST". Keeping it as SST for consistency
-            sst_pb = col_pd1.number_input("SST (%)", 
-                                          min_value=0.0, 
-                                          max_value=100.0, 
-                                          value=0.0, 
-                                          step=0.5, 
-                                          key=f"pb_sst_{proj_sel}")
-            owners_pb = col_pd2.number_input("Owner's Cost (%)", 
+            # Note: In Data tab it's "Pre-Development", matching that here
+            predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", 
+                                                     min_value=0.0, 
+                                                     max_value=100.0, 
+                                                     value=0.0, 
+                                                     step=0.5, 
+                                                     key=f"pb_predev_{proj_sel}")
+            owners_pb = col_pd2.number_input("Enter Owner's Cost (%)", 
                                              min_value=0.0, 
                                              max_value=100.0, 
                                              value=0.0, 
                                              step=0.5, 
                                              key=f"pb_owners_{proj_sel}")
             
-            # Contingency and Escalation - EXACT SAME FORMAT
+            # Contingency and Escalation - EXACT SAME FORMAT as Data tab
             col_cont1, col_cont2 = st.columns(2)
             with col_cont1:
                 st.subheader("⚠️ Cost Contingency Input")
@@ -846,6 +844,19 @@ def main():
                                          key=f"pb_esc_{proj_sel}")
             
             st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
+        
+        # IMPORTANT: Update the eprr_pb dictionary to match the new structure
+        # This maps the Cost Breakdown names to your original eprr_pb structure
+        eprr_pb = {
+            "Engineering": epcic_percentages.get("Engineering", 0.0),
+            "Procurement": epcic_percentages.get("Procurement", 0.0),
+            "Fabrication/Construction": epcic_percentages.get("Construction", 0.0),
+            "Transportation & Installation": epcic_percentages.get("Installation", 0.0),
+            "Commissioning": epcic_percentages.get("Commissioning", 0.0)
+        }
+        
+        # For SST, use predev_percentage (since Data tab calls it Pre-Development)
+        sst_pb = predev_percentage
         
         # IMPORTANT: Update the eprr_pb dictionary to match the new structure
         # This maps the Cost Breakdown names to your original eprr_pb structure
@@ -1017,5 +1028,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
