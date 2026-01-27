@@ -854,16 +854,6 @@ def main():
         
         # For SST, use predev_percentage (since Data tab calls it Pre-Development)
         sst_pb = predev_percentage
-        
-        # IMPORTANT: Update the eprr_pb dictionary to match the new structure
-        # This maps the Cost Breakdown names to your original eprr_pb structure
-        eprr_pb = {
-            "Engineering": epcic_percentages.get("Engineering", 0.0),
-            "Procurement": epcic_percentages.get("Procurement", 0.0),
-            "Fabrication/Construction": epcic_percentages.get("Construction", 0.0),
-            "Transportation & Installation": epcic_percentages.get("Installation", 0.0),
-            "Commissioning": epcic_percentages.get("Commissioning", 0.0)
-        }
 
         if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
             try:
@@ -1060,6 +1050,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
