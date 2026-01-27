@@ -246,13 +246,13 @@ st.markdown(f"""
 # ----------------------------
 # Logo (float animation)
 # ----------------------------
-logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
-st.markdown(
-    f"""
-    <div style="display:flex; justify-content:center; align-items:center; margin: 0.6rem 0 0.4rem 0;">
-        <img class="logo-float" src="{logo_url}" width="290" style="filter: drop-shadow(0 10px 18px rgba(0,58,93,0.18));">
-    </div>
-    """,
+# logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
+# st.markdown(
+    # f"""
+    # <div style="display:flex; justify-content:center; align-items:center; margin: 0.6rem 0 0.4rem 0;">
+        # <img class="logo-float" src="{logo_url}" width="290" style="filter: drop-shadow(0 10px 18px rgba(0,58,93,0.18));">
+    # </div>
+    # """,
     unsafe_allow_html=True
 )
 
