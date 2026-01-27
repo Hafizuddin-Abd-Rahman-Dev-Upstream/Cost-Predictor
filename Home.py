@@ -254,7 +254,7 @@ st.markdown(f"""
     # </div>
     # """,
     # unsafe_allow_html=True
-)
+# )
 
 # Catchphrase (modern)
 st.markdown(f"""
