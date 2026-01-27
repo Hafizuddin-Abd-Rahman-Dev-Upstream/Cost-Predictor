@@ -466,7 +466,7 @@ def main():
 
             st.subheader('Cost Curve (Original Data Only)')
             feature = st.selectbox('Select feature for cost curve (Data Visualization)', X.columns, key='cost_curve_feature_viz')
-            fig, ax = plt.subplots(figsize=(3, 2))
+            fig, ax = plt.subplots(figsize=(7, 8))
             x_vals = df_imputed[feature].values
             y_vals = y.values
             mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
@@ -1055,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
