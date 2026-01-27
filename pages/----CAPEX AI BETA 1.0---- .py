@@ -914,20 +914,74 @@ def main():
             st.info("No components yet. Add at least one above.")
             st.stop()
 
-        dfc = project_components_df(proj)
+        # Create DataFrame like Prediction Summary in Data tab
+        rows = []
+        for c in comps:
+            row = {
+                "Component": c["component_type"],
+                "Dataset": c["dataset"],
+                "Model": c.get("model_used", "RandomForest"),
+            }
+            
+            # Add all feature inputs
+            for feature, value in c["inputs"].items():
+                if not pd.isna(value):
+                    row[feature] = value
+            
+            # Add base prediction
+            row["Base CAPEX"] = float(c["prediction"])
+            
+            # Add EPRR breakdown costs (from eprr_costs)
+            eprr_costs = c["breakdown"].get("eprr_costs", {})
+            for phase, cost in eprr_costs.items():
+                row[f"{phase} Cost"] = float(cost)
+            
+            # Add other cost breakdowns
+            row["Pre-Development Cost"] = float(c["breakdown"].get("sst_cost", 0.0))
+            row["Owner's Cost"] = float(c["breakdown"].get("owners_cost", 0.0))
+            row["Cost Contingency"] = float(c["breakdown"].get("contingency_cost", 0.0))
+            row["Escalation & Inflation"] = float(c["breakdown"].get("escalation_cost", 0.0))
+            row["Grand Total"] = float(c["breakdown"].get("grand_total", 0.0))
+            
+            rows.append(row)
+        
+        dfc = pd.DataFrame(rows)
         curr = proj.get("currency", "") or curr_ds
 
-        st.dataframe(
-            dfc.style.format(
-                {
-                    "Base CAPEX": "{:,.2f}",
-                    "Owner's Cost": "{:,.2f}",
-                    "Contingency": "{:,.2f}",
-                    "Escalation": "{:,.2f}",
-                    "SST": "{:,.2f}",
-                    "Grand Total": "{:,.2f}",
-                }
-            ),
+        # Display the table like Prediction Summary
+        if not dfc.empty:
+            # Format numeric columns with commas
+            num_cols = dfc.select_dtypes(include=[np.number]).columns
+            dfc_display = dfc.copy()
+            for col in num_cols:
+                dfc_display[col] = dfc_display[col].apply(lambda x: format_with_commas(x))
+            
+            st.dataframe(dfc_display, use_container_width=True, height=420)
+            
+            # Add download button like Prediction Summary
+            towrite = io.BytesIO()
+            dfc.to_excel(towrite, index=False, engine='openpyxl')
+            towrite.seek(0)
+            st.download_button(
+                "Download Project Components as Excel",
+                data=towrite,
+                file_name=f"{proj_sel}_components.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.write("No components available.")
+
+        # Keep the metrics summary (optional)
+        t = project_totals(proj)
+        proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
+
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
+        with col_t2:
+            st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
+        with col_t3:
+            st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
             use_container_width=True,
         )
 
@@ -1025,6 +1079,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
