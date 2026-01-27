@@ -441,7 +441,7 @@ def main():
         with st.expander('Data Visualization', expanded=False):
             st.subheader('Correlation Matrix')
             feature_count = len(X.columns)
-            corr_height = min(9, max(7, feature_count * 0.5))
+            corr_height = min(7, max(5, feature_count * 0.4))
             
             # Create correlation matrix from the imputed data
             df_for_corr = pd.concat([X, y], axis=1)
@@ -1055,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
