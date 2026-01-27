@@ -615,14 +615,14 @@ with col1:
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2);'>
             <h4>📊 Cost Predictor</h4>
-            <p>AI-powered cost estimation based on project parameters and historical data.</p>
+            <p>cost estimation based on project parameters and historical data.</p>
         </div>
         """, unsafe_allow_html=True)
         
     with st.container():
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
-            <h4>📈 Benchmark Analyzer</h4>
+            <h4>📈 Compare Projects </h4>
             <p>Compare project costs against industry benchmarks and historical data.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -639,7 +639,7 @@ with col2:
     with st.container():
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
-            <h4>📄 Report Generator</h4>
+            <h4>📄 Downloads </h4>
             <p>Automatically generate professional cost estimation reports.</p>
         </div>
         """, unsafe_allow_html=True)
