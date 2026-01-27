@@ -914,24 +914,17 @@ def main():
             st.info("No components yet. Add at least one above.")
             st.stop()
 
-        # Create DataFrame like Prediction Summary in Data tab
+        # Create DataFrame with all component data
         rows = []
         for c in comps:
             row = {
                 "Component": c["component_type"],
                 "Dataset": c["dataset"],
                 "Model": c.get("model_used", "RandomForest"),
+                "Base CAPEX": float(c["prediction"])
             }
             
-            # Add all feature inputs
-            for feature, value in c["inputs"].items():
-                if not pd.isna(value):
-                    row[feature] = value
-            
-            # Add base prediction
-            row["Base CAPEX"] = float(c["prediction"])
-            
-            # Add EPRR breakdown costs (from eprr_costs)
+            # Add EPRR breakdown costs
             eprr_costs = c["breakdown"].get("eprr_costs", {})
             for phase, cost in eprr_costs.items():
                 row[f"{phase} Cost"] = float(cost)
@@ -948,7 +941,7 @@ def main():
         dfc = pd.DataFrame(rows)
         curr = proj.get("currency", "") or curr_ds
 
-        # Display the table like Prediction Summary
+        # Display the table
         if not dfc.empty:
             # Format numeric columns with commas
             num_cols = dfc.select_dtypes(include=[np.number]).columns
@@ -958,7 +951,7 @@ def main():
             
             st.dataframe(dfc_display, use_container_width=True, height=420)
             
-            # Add download button like Prediction Summary
+            # Download button
             towrite = io.BytesIO()
             dfc.to_excel(towrite, index=False, engine='openpyxl')
             towrite.seek(0)
@@ -966,25 +959,13 @@ def main():
                 "Download Project Components as Excel",
                 data=towrite,
                 file_name=f"{proj_sel}_components.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"download_components_{proj_sel}"
             )
         else:
             st.write("No components available.")
 
-        # Keep the metrics summary (optional)
-        t = project_totals(proj)
-        proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
-
-        col_t1, col_t2, col_t3 = st.columns(3)
-        with col_t1:
-            st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
-        with col_t2:
-            st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
-        with col_t3:
-            st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
-            use_container_width=True,
-        )
-
+        # Keep the metrics summary
         t = project_totals(proj)
         proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
 
@@ -1079,6 +1060,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
