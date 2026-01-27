@@ -968,7 +968,14 @@ def main():
             st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
 
         st.markdown("#### Component Cost Composition")
-        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Contingency", "Escalation", "SST"]].copy()
+        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
+        df_cost = df_cost.rename(columns={
+            "Base CAPEX": "CAPEX", 
+            "Owner's Cost": "Owner",
+            "Cost Contingency": "Contingency",
+            "Escalation & Inflation": "Escalation",
+            "Pre-Development Cost": "SST"
+        })
         df_cost = df_cost.rename(columns={"Base CAPEX": "CAPEX", "Owner's Cost": "Owner"})
         df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
         fig_stack = plt.figure(figsize=(10, 6))
@@ -1050,6 +1057,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
