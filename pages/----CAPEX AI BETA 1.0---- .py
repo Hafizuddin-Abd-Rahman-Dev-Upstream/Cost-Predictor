@@ -908,42 +908,56 @@ def main():
             st.info("No components yet. Add at least one above.")
             st.stop()
 
-        # Create DataFrame with all component data - EXACT FORMAT AS PREDICTION SUMMARY
+        # Create DataFrame with all component data - INCLUDING EPCIC BREAKDOWN
         rows = []
-        for idx, c in enumerate(comps):
+        for c in comps:
             breakdown = c.get("breakdown", {})
             epcic_costs = breakdown.get("epcic_costs", {})
-            inputs = c.get("inputs", {})
             
+            # Start with the row
             row = {
-                "Component": c.get("component_type", f"Component {idx+1}"),
+                "Component": c.get("component_type", "Unknown"),
                 "Dataset": c.get("dataset", "Unknown"),
+                "Model": c.get("model_used", "RandomForest"),
+                "Base CAPEX": float(c.get("prediction", 0.0))
             }
             
-            # 1. Add all input features FIRST (like Prediction Summary)
-            for feature_name, feature_value in inputs.items():
-                if pd.notna(feature_value):
-                    row[feature_name] = float(feature_value)
-            
-            # 2. Add Base CAPEX (this is like the target_column in Prediction Summary)
-            row["Base CAPEX"] = float(c.get("prediction", 0.0))
-            
-            # 3. Add EPCIC costs (Engineering Cost, Procurement Cost, etc.)
-            for phase, cost in epcic_costs.items():
+            # ADD EPCIC COSTS TO THE TABLE (these will appear as separate columns)
+            # Make sure all EPCIC phases are included even if 0
+            epcic_phases = ["Engineering", "Procurement", "Construction", "Installation", "Commissioning"]
+            for phase in epcic_phases:
+                cost = epcic_costs.get(phase, 0.0)
                 row[f"{phase} Cost"] = float(cost)
             
-            # 4. Add other cost breakdowns
+            # Add other cost breakdowns (same as before)
             row["Pre-Development Cost"] = float(breakdown.get("predev_cost", 0.0))
             row["Owner's Cost"] = float(breakdown.get("owners_cost", 0.0))
             row["Cost Contingency"] = float(breakdown.get("contingency_cost", 0.0))
             row["Escalation & Inflation"] = float(breakdown.get("escalation_cost", 0.0))
-            
-            # 5. Add Grand Total at the end
             row["Grand Total"] = float(breakdown.get("grand_total", 0.0))
             
             rows.append(row)
         
         dfc = pd.DataFrame(rows)
+        
+        # Optional: Reorder columns for better readability
+        # Define the column order you want
+        column_order = ["Component", "Dataset", "Model", "Base CAPEX"]
+        
+        # Add EPCIC cost columns in specific order
+        epcic_columns = ["Engineering Cost", "Procurement Cost", "Construction Cost", "Installation Cost", "Commissioning Cost"]
+        for col in epcic_columns:
+            if col in dfc.columns:
+                column_order.append(col)
+        
+        # Add remaining cost columns
+        remaining_columns = ["Pre-Development Cost", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Grand Total"]
+        for col in remaining_columns:
+            if col in dfc.columns:
+                column_order.append(col)
+        
+        # Reorder the dataframe
+        dfc = dfc[column_order]
         
         # Reorder columns to match Prediction Summary pattern: Component, features, Base CAPEX, costs, Grand Total
         # This puts features first, then Base CAPEX, then EPCIC costs, then other costs
@@ -1099,6 +1113,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
