@@ -445,7 +445,7 @@ def main():
             
             # Create correlation matrix from the imputed data
             df_for_corr = pd.concat([X, y], axis=1)
-            fig, ax = plt.subplots(figsize=(8, corr_height))
+            fig, ax = plt.subplots(figsize=(6, corr_height))
             sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
             plt.tight_layout()
             st.pyplot(fig)
@@ -466,7 +466,7 @@ def main():
 
             st.subheader('Cost Curve (Original Data Only)')
             feature = st.selectbox('Select feature for cost curve (Data Visualization)', X.columns, key='cost_curve_feature_viz')
-            fig, ax = plt.subplots(figsize=(7, 6))
+            fig, ax = plt.subplots(figsize=(5, 4))
             x_vals = df_imputed[feature].values
             y_vals = y.values
             mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
@@ -1055,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
