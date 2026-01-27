@@ -12,6 +12,8 @@ from sklearn.impute import KNNImputer
 import io
 import requests
 from matplotlib.ticker import FuncFormatter
+import json
+import zipfile
 
 #Hide Streamlit header icons (commented out, not executed)
 #st.markdown("""
@@ -26,10 +28,13 @@ from matplotlib.ticker import FuncFormatter
 st.set_page_config(
     page_title="CAPEX AI RT2025",
     page_icon="💲",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
+    layout="wide"
 )
 
-# Password protection
+# ---------------------------------------------------------------------------------------
+# AUTHENTICATION
+# ---------------------------------------------------------------------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
@@ -53,6 +58,25 @@ if not st.session_state.authenticated:
                 st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
     st.stop()
 
+# ---------------------------------------------------------------------------------------
+# SESSION STATE INITIALIZATION
+# ---------------------------------------------------------------------------------------
+if "datasets" not in st.session_state:
+    st.session_state.datasets = {}
+if "predictions" not in st.session_state:
+    st.session_state.predictions = {}
+if "processed_excel_files" not in st.session_state:
+    st.session_state.processed_excel_files = set()
+if "projects" not in st.session_state:
+    st.session_state.projects = {}
+if "component_labels" not in st.session_state:
+    st.session_state.component_labels = {}
+if "widget_nonce" not in st.session_state:
+    st.session_state.widget_nonce = 0
+
+# ---------------------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# ---------------------------------------------------------------------------------------
 GITHUB_USER = "Hafizuddin-Abd-Rahman-Dev-Upstream"
 REPO_NAME = "Cost-Predictor"
 BRANCH = "main"
@@ -84,14 +108,14 @@ def format_with_commas(num):
 
 def get_currency_symbol(df):
     for col in df.columns:
-        if '' in col.upper():
-            return ''
-        elif '' in col.upper() or '$' in col:
-            return ''
-        elif '' in col.upper() or '€' in col:
-            return ''
-        elif '' in col.upper() or '£' in col:
-            return ''
+        if 'MYR' in col.upper() or 'RM' in col:
+            return 'MYR'
+        elif 'USD' in col.upper() or '$' in col:
+            return 'USD'
+        elif 'EUR' in col.upper() or '€' in col:
+            return 'EUR'
+        elif 'GBP' in col.upper() or '£' in col:
+            return 'GBP'
     return ''
 
 def format_currency(amount, currency=''):
@@ -128,388 +152,542 @@ def download_all_predictions():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
+def cost_breakdown(base_pred, eprr, sst_pct, owners_pct, cont_pct, esc_pct):
+    base_pred = float(base_pred)
+    
+    owners_cost = round(base_pred * (owners_pct / 100.0), 2)
+    sst_cost = round(base_pred * (sst_pct / 100.0), 2)
+    
+    contingency_cost = round((base_pred + owners_cost) * (cont_pct / 100.0), 2)
+    escalation_cost = round((base_pred + owners_cost) * (esc_pct / 100.0), 2)
+    
+    eprr_costs = {k: round(base_pred * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
+    
+    grand_total = round(base_pred + owners_cost + sst_cost + contingency_cost + escalation_cost, 2)
+    return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
+
+def project_components_df(proj):
+    comps = proj.get("components", [])
+    rows = []
+    for c in comps:
+        rows.append(
+            {
+                "Component": c["component_type"],
+                "Dataset": c["dataset"],
+                "Base CAPEX": float(c["prediction"]),
+                "Owner's Cost": float(c["breakdown"]["owners_cost"]),
+                "Contingency": float(c["breakdown"]["contingency_cost"]),
+                "Escalation": float(c["breakdown"]["escalation_cost"]),
+                "SST": float(c["breakdown"]["sst_cost"]),
+                "Grand Total": float(c["breakdown"]["grand_total"]),
+            }
+        )
+    return pd.DataFrame(rows)
+
+def project_totals(proj):
+    dfc = project_components_df(proj)
+    if dfc.empty:
+        return {"capex_sum": 0.0, "owners": 0.0, "cont": 0.0, "esc": 0.0, "sst": 0.0, "grand_total": 0.0}
+    return {
+        "capex_sum": float(dfc["Base CAPEX"].sum()),
+        "owners": float(dfc["Owner's Cost"].sum()),
+        "cont": float(dfc["Contingency"].sum()),
+        "esc": float(dfc["Escalation"].sum()),
+        "sst": float(dfc["SST"].sum()),
+        "grand_total": float(dfc["Grand Total"].sum()),
+    }
+
+def single_prediction(rf_model, scaler, X_columns, payload):
+    df_input = pd.DataFrame([payload])
+    # Ensure all required columns are present
+    for col in X_columns:
+        if col not in df_input.columns:
+            df_input[col] = np.nan
+    input_scaled = scaler.transform(df_input[X_columns])
+    return float(rf_model.predict(input_scaled)[0])
+
+def create_project_excel_report_capex(project_name, proj, currency=""):
+    output = io.BytesIO()
+    comps_df = project_components_df(proj)
+    
+    if comps_df.empty:
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            pd.DataFrame({"Info": [f"No components for project {project_name}"]}).to_excel(
+                writer, sheet_name="Summary", index=False
+            )
+        output.seek(0)
+        return output
+    
+    totals = project_totals(proj)
+    
+    summary_df = comps_df.copy()
+    summary_df.loc[len(summary_df)] = {
+        "Component": "TOTAL",
+        "Dataset": "",
+        "Base CAPEX": totals["capex_sum"],
+        "Owner's Cost": totals["owners"],
+        "Contingency": totals["cont"],
+        "Escalation": totals["esc"],
+        "SST": totals["sst"],
+        "Grand Total": totals["grand_total"],
+    }
+    
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        summary_df.to_excel(writer, sheet_name="Summary", index=False)
+        comps_df.to_excel(writer, sheet_name="Components Detail", index=False)
+    
+    output.seek(0)
+    return output
+
+# ---------------------------------------------------------------------------------------
+# MAIN APP
+# ---------------------------------------------------------------------------------------
 def main():
     st.title('💲CAPEX AI RT2025💲')
+    
+    # Initialize session state
     if 'datasets' not in st.session_state:
         st.session_state['datasets'] = {}
     if 'predictions' not in st.session_state:
         st.session_state['predictions'] = {}
     if 'processed_excel_files' not in st.session_state:
         st.session_state['processed_excel_files'] = set()
+    if 'projects' not in st.session_state:
+        st.session_state.projects = {}
+    if 'component_labels' not in st.session_state:
+        st.session_state.component_labels = {}
+    if 'widget_nonce' not in st.session_state:
+        st.session_state.widget_nonce = 0
+    
+    # Create tabs
+    tab_data, tab_pb, tab_compare = st.tabs(["📊 Data", "🏗️ Project Builder", "🔀 Compare Projects"])
+    
+    # =======================================================================================
+    # DATA TAB
+    # =======================================================================================
+    with tab_data:
+        st.sidebar.header('Data Controls')
         
-    st.sidebar.header('Data Controls')
-    if st.sidebar.button("Clear all predictions"):
-        st.session_state['predictions'] = {}
-        st.sidebar.success("All predictions cleared!")
-    if st.sidebar.button("Clear processed files history"):
-        st.session_state['processed_excel_files'] = set()
-        st.sidebar.success("Processed files history cleared!")
-    if st.sidebar.button("📥 Download All Predictions"):
-        if st.session_state['predictions']:
-            download_all_predictions()
-            st.sidebar.success("All predictions compiled successfully!")
-        else:
-            st.sidebar.warning("No predictions to download.")
-            
-    # Add horizontal line in sidebar
-    st.sidebar.markdown('---')
-    
-    st.sidebar.header('System Controls')
-    if st.sidebar.button("🔄 Refresh System"):
-        list_csvs_from_manifest.clear()
-
-    # Add horizontal line in sidebar
-    st.sidebar.markdown('---')
-    
-    st.sidebar.subheader("📁 Choose Data Source")
-    data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
-    uploaded_files = []
-    if data_source == "Upload CSV":
-        uploaded_files = st.sidebar.file_uploader(
-            "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
-        )
-        # Add this block below the file uploader
-        st.sidebar.markdown("### 📁 Or access data from external link")
-        data_link = "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase%2FCAPEX%20%2D%20RT%20Q1%202025&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"  # <-- CHANGE THIS TO YOUR ACTUAL LINK
-        st.sidebar.markdown(
-            f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
-            unsafe_allow_html=True
-        )
-    
-    elif data_source == "Load from Server":
-        github_csvs = list_csvs_from_manifest(DATA_FOLDER)
-        if github_csvs:
-            selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
-            if selected_file:
-                raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
-                try:
-                    df = pd.read_csv(raw_url)
-                    fake_file = type('FakeUpload', (), {'name': selected_file})
-                    uploaded_files.append(fake_file)
-                    st.session_state['datasets'][selected_file] = df
-                    if selected_file not in st.session_state['predictions']:
-                        st.session_state['predictions'][selected_file] = []
-                    st.success(f"✅ Loaded from GitHub: {selected_file}")
-                except Exception as e:
-                    st.error(f"Error loading CSV: {e}")
-        else:
-            st.warning("No CSV files found in GitHub folder.")
-    for uploaded_file in uploaded_files:
-        if uploaded_file.name not in st.session_state['datasets']:
-            df = pd.read_csv(uploaded_file)
-            st.session_state['datasets'][uploaded_file.name] = df
-            if uploaded_file.name not in st.session_state['predictions']:
-                st.session_state['predictions'][uploaded_file.name] = []
-
-    # Add horizontal line in sidebar
-    st.sidebar.markdown('---')
-    
-    if st.sidebar.checkbox("🧹 Cleanup Current Session", value=False,
-                           help="Enable this if you want to remove datasets not uploaded in this session."):
-        uploaded_names = {f.name for f in uploaded_files}
-        for name in list(st.session_state['datasets'].keys()):
-            if name not in uploaded_names:
-                del st.session_state['datasets'][name]
-                st.session_state['predictions'].pop(name, None)
-    if not st.session_state['datasets']:
-        st.write("Please upload one or more CSV files to begin.")
-        return
-
-    selected_dataset_name = st.sidebar.selectbox(
-        "Select a dataset for prediction",
-        list(st.session_state['datasets'].keys())
-    )
-    df = st.session_state['datasets'][selected_dataset_name]
-    clean_name = selected_dataset_name.replace('.csv', '')
-    st.subheader(f"📊 Metrics: {clean_name}")
-
-    currency = get_currency_symbol(df)
-    
-    # Store the first column separately for project names
-    project_names = df.iloc[:, 0] if len(df.columns) > 0 else pd.Series()
-    
-    # Use all columns except the first one for the model
-    # The last column is still the target, but now we start from column 1
-    df_model = df.iloc[:, 1:] if len(df.columns) > 1 else df
-    
-    imputer = KNNImputer(n_neighbors=5)
-    df_imputed = pd.DataFrame(imputer.fit_transform(df_model), columns=df_model.columns)
-    
-    # Minimized collapse for Data Overview
-    with st.expander('Data Overview', expanded=False):
-        st.header('Data Overview')
-        # Show only the modeling data (without project names)
-        st.write('Dataset Shape:', df_imputed.shape)
-        st.dataframe(df_imputed.head())
-
-    # X includes all columns except the first (project name) and the last (target)
-    # y is still the last column
-    X = df_imputed.iloc[:, :-1]
-    y = df_imputed.iloc[:, -1]
-    target_column = y.name
-
-    # Minimized collapse for Model Training and Performance
-    with st.expander('Model Training and Performance', expanded=False):
-        st.header('Model Training and Performance')
-        test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
-        scaler = MinMaxScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
-        rf_model = RandomForestRegressor(random_state=42)
-        rf_model.fit(X_train_scaled, y_train)
-        y_pred = rf_model.predict(X_test_scaled)
-
-    # st.header('Model Performance')
-        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
-        r2 = r2_score(y_test, y_pred)
-        col1, col2 = st.columns(2)
-        col1.metric('RMSE', f'{rmse:,.2f}')
-        col2.metric('R² Score', f'{r2:.2f}')
-
-    # Minimized collapse for Data Visualization
-    with st.expander('Data Visualization', expanded=False):
-        st.subheader('Correlation Matrix')
-        feature_count = len(X.columns)
-        corr_height = min(9, max(7, feature_count * 0.5))
-        
-        # Create correlation matrix from the imputed data
-        df_for_corr = pd.concat([X, y], axis=1)
-        fig, ax = plt.subplots(figsize=(8, corr_height))
-        sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-
-        st.subheader('Feature Importance')
-        fi_height = min(8, max(4, feature_count * 0.3))
-        fig, ax = plt.subplots(figsize=(8, fi_height))
-        importance_df = pd.DataFrame({
-            'feature': X.columns,
-            'importance': rf_model.feature_importances_
-        }).sort_values('importance', ascending=False)
-        sns.barplot(data=importance_df, x='importance', y='feature')
-        plt.title('Feature Importance')
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-
-        st.subheader('Cost Curve (Original Data Only)')
-        feature = st.selectbox('Select feature for cost curve (Data Visualization)', X.columns, key='cost_curve_feature_viz')
-        fig, ax = plt.subplots(figsize=(7, 6))
-        x_vals = df_imputed[feature].values
-        y_vals = y.values
-        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-        if mask.sum() >= 2:
-            slope, intercept, r_val, _, _ = linregress(x_vals[mask], y_vals[mask])
-            sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
-            x_line = np.linspace(min(x_vals[mask]), max(x_vals[mask]), 100)
-            y_line = slope * x_line + intercept
-            ax.plot(x_line, y_line, color='red', label=f'Fit: y = {slope:.2f} * x + {intercept:.2f}')
-            ax.text(0.05, 0.95, f'$R^2$ = {r_val**2:.3f}', transform=ax.transAxes,
-                    verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
-        else:
-            sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
-            st.warning("Not enough data for regression.")
-        ax.set_xlabel(feature)
-        ax.set_ylabel(target_column)
-        ax.set_title(f'Cost Curve: {feature} vs {target_column}')
-        ax.legend()
-        ax.xaxis.set_major_formatter(FuncFormatter(human_format))
-        ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-        plt.tight_layout()
-        st.pyplot(fig)
-        plt.close()
-
-    # Minimized/collapsible Cost Breakdown Configuration
-    with st.expander('Cost Breakdown Configuration', expanded=False):
-        st.header('Cost Breakdown Configuration')
-        st.subheader("🔧 Cost Breakdown Percentage Input")
-        st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
-        epcic_percentages = {}
-        col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
-        epcic_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=0.0)
-        epcic_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=0.0)
-        epcic_percentages["Construction"] = col_ep3.number_input("Construction (%)", min_value=0.0, max_value=100.0, value=0.0)
-        epcic_percentages["Installation"] = col_ep4.number_input("Installation (%)", min_value=0.0, max_value=100.0, value=0.0)
-        epcic_percentages["Commissioning"] = col_ep5.number_input("Commissioning (%)", min_value=0.0, max_value=100.0, value=0.0)
-        epcic_total = sum(epcic_percentages.values())
-        if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
-            st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
-        st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
-        st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
-        st.markdown("")
-        col_pd1, col_pd2 = st.columns(2)
-        predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0)
-        owners_percentage = col_pd2.number_input("Enter Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0)
-        col_cont1, col_cont2 = st.columns(2)
-        with col_cont1:
-            st.subheader("⚠️ Cost Contingency Input")
-            st.markdown("")
-            contingency_percentage = st.number_input("Enter Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0)
-        with col_cont2:
-            st.subheader("📈 Escalation & Inflation Percentage Input")
-            st.markdown("")
-            escalation_percentage = st.number_input("Enter Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0)
-        st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
-
-    st.header('Make New Predictions')
-    project_name = st.text_input('Enter Project Name')
-    num_features = len(X.columns)
-    if num_features <= 2:
-        cols = st.columns(num_features)
-    else:
-        cols = []
-        for i in range(0, num_features, 2):
-            row_cols = st.columns(min(2, num_features - i))
-            cols.extend(row_cols)
-    new_data = {}
-    for i, col in enumerate(X.columns):
-        col_idx = i % len(cols) if len(cols) > 0 else 0
-        user_val = cols[col_idx].text_input(f'{col}', key=f'input_{col}')
-        if user_val.strip().lower() == "nan" or user_val.strip() == "":
-            new_data[col] = np.nan
-        else:
-            try:
-                new_data[col] = float(user_val)
-            except ValueError:
-                new_data[col] = np.nan
-
-    if st.button('Predict'):
-        df_input = pd.DataFrame([new_data])
-        input_scaled = scaler.transform(df_input)
-        pred = rf_model.predict(input_scaled)[0]
-        result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
-        epcic_breakdown = {}
-        for phase, percent in epcic_percentages.items():
-            cost = round(pred * (percent / 100), 2)
-            result[f"{phase} Cost"] = cost
-            epcic_breakdown[phase] = {'cost': cost, 'percentage': percent}
-        predev_cost = round(pred * (predev_percentage / 100), 2)
-        owners_cost = round(pred * (owners_percentage / 100), 2)
-        result["Pre-Development Cost"] = predev_cost
-        result["Owner's Cost"] = owners_cost
-        contingency_base = pred + owners_cost
-        contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
-        result["Cost Contingency"] = contingency_cost
-        escalation_base = pred + owners_cost
-        escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
-        result["Escalation & Inflation"] = escalation_cost
-        grand_total = round(pred + owners_cost + contingency_cost + escalation_cost, 2)
-        result["Grand Total"] = grand_total
-        st.session_state['predictions'][selected_dataset_name].append(result)
-        display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
-        has_breakdown = any(data['percentage'] > 0 for data in epcic_breakdown.values()) or \
-                       predev_percentage > 0 or owners_percentage > 0 or \
-                       contingency_percentage > 0 or escalation_percentage > 0
-        if has_breakdown:
-            for phase, data in epcic_breakdown.items():
-                if data['percentage'] > 0:
-                    display_text += f"• {phase} ({data['percentage']:.1f}%): {format_currency(data['cost'], currency)}\n\n"
-            if predev_percentage > 0:
-                display_text += f"**Pre-Development ({predev_percentage:.1f}%):** {format_currency(predev_cost, currency)}\n\n"
-            if owners_percentage > 0:
-                display_text += f"**Owner's Cost ({owners_percentage:.1f}%):** {format_currency(owners_cost, currency)}\n\n"
-            if contingency_percentage > 0:
-                display_text += f"**Contingency ({contingency_percentage:.1f}%):** {format_currency(contingency_cost, currency)}\n\n"
-            if escalation_percentage > 0:
-                display_text += f"**Escalation & Inflation ({escalation_percentage:.3f}%):** {format_currency(escalation_cost, currency)}\n\n"
-        display_text += f"**Grand Total:** {format_currency(grand_total, currency)}"
-        st.success(display_text)
-
-    st.write("Or upload an Excel file:")
-    excel_file = st.file_uploader("Upload Excel file", type=["xlsx"])
-    if excel_file:
-        file_id = f"{excel_file.name}_{excel_file.size}_{selected_dataset_name}"
-        if file_id not in st.session_state['processed_excel_files']:
-            batch_df = pd.read_excel(excel_file)
-            
-            # Skip the first column (assuming it's project names/identifiers)
-            if len(batch_df.columns) > 1:
-                batch_features = batch_df.iloc[:, 1:]  # Skip first column
-                # Ensure we have the right columns for prediction
-                if set(X.columns).issubset(batch_features.columns):
-                    scaled = scaler.transform(batch_features[X.columns])
-                    preds = rf_model.predict(scaled)
-                    
-                    for i, row in batch_df.iterrows():
-                        # Use the first column as project name
-                        name = row.iloc[0] if not pd.isna(row.iloc[0]) else f"Project {i+1}"
-                        entry = {'Project Name': str(name)}
-                        
-                        # Add the feature values (skip the first column)
-                        for feature in X.columns:
-                            entry[feature] = row[feature] if feature in row else np.nan
-                        
-                        entry[target_column] = round(preds[i], 2)
-                        
-                        # Add cost breakdown
-                        for phase, percent in epcic_percentages.items():
-                            cost = round(preds[i] * (percent / 100), 2)
-                            entry[f"{phase} Cost"] = cost
-                        
-                        predev_cost = round(preds[i] * (predev_percentage / 100), 2)
-                        owners_cost = round(preds[i] * (owners_percentage / 100), 2)
-                        entry["Pre-Development Cost"] = predev_cost
-                        entry["Owner's Cost"] = owners_cost
-                        
-                        contingency_base = preds[i] + owners_cost
-                        contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
-                        entry["Cost Contingency"] = contingency_cost
-                        
-                        escalation_base = preds[i] + owners_cost
-                        escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
-                        entry["Escalation & Inflation"] = escalation_cost
-                        
-                        grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
-                        entry["Grand Total"] = grand_total
-                        
-                        st.session_state['predictions'][selected_dataset_name].append(entry)
-                    
-                    st.session_state['processed_excel_files'].add(file_id)
-                    st.success("Batch prediction successful!")
-                else:
-                    st.error(f"Excel missing required columns. Needed: {list(X.columns)}")
+        if st.sidebar.button("Clear all predictions"):
+            st.session_state['predictions'] = {}
+            st.sidebar.success("All predictions cleared!")
+        if st.sidebar.button("Clear processed files history"):
+            st.session_state['processed_excel_files'] = set()
+            st.sidebar.success("Processed files history cleared!")
+        if st.sidebar.button("📥 Download All Predictions"):
+            if st.session_state['predictions']:
+                download_all_predictions()
+                st.sidebar.success("All predictions compiled successfully!")
             else:
-                st.error("Excel file must have at least 2 columns (project name + features)")
+                st.sidebar.warning("No predictions to download.")
+                
+        # Add horizontal line in sidebar
+        st.sidebar.markdown('---')
+        
+        st.sidebar.header('System Controls')
+        if st.sidebar.button("🔄 Refresh System"):
+            list_csvs_from_manifest.clear()
 
-    with st.expander('Simplified Project List', expanded=True):
-        preds = st.session_state['predictions'][selected_dataset_name]
-        if preds:
-            if st.button('Delete All', key='delete_all'):
-                st.session_state['predictions'][selected_dataset_name] = []
-                to_remove = {fid for fid in st.session_state['processed_excel_files'] if fid.endswith(selected_dataset_name)}
-                for fid in to_remove:
-                    st.session_state['processed_excel_files'].remove(fid)
-                st.rerun()
-            for i, p in enumerate(preds):
-                c1, c2 = st.columns([3, 1])
-                c1.write(p['Project Name'])
-                if c2.button('Delete', key=f'del_{i}'):
-                    preds.pop(i)
-                    st.rerun()
-        else:
-            st.write("No predictions yet.")
+        # Add horizontal line in sidebar
+        st.sidebar.markdown('---')
+        
+        st.sidebar.subheader("📁 Choose Data Source")
+        data_source = st.sidebar.radio("Data Source", ["Upload CSV", "Load from Server"], index=0)
+        uploaded_files = []
+        if data_source == "Upload CSV":
+            uploaded_files = st.sidebar.file_uploader(
+                "Upload CSV files (max 200MB)", type="csv", accept_multiple_files=True
+            )
+            # Add this block below the file uploader
+            st.sidebar.markdown("### 📁 Or access data from external link")
+            data_link = "https://petronas.sharepoint.com/sites/ecm_ups_coe/confidential/DFE%20Cost%20Engineering/Forms/AllItems.aspx?id=%2Fsites%2Fecm%5Fups%5Fcoe%2Fconfidential%2FDFE%20Cost%20Engineering%2F2%2ETemplate%20Tools%2FCost%20Predictor%2FDatabase%2FCAPEX%20%2D%20RT%20Q1%202025&viewid=25092e6d%2D373d%2D41fe%2D8f6f%2D486cd8cdd5b8"
+            st.sidebar.markdown(
+                f'<a href="{data_link}" target="_blank"><button style="background-color:#0099ff;color:white;padding:8px 16px;border:none;border-radius:4px;">Open Data Storage</button></a>',
+                unsafe_allow_html=True
+            )
+        
+        elif data_source == "Load from Server":
+            github_csvs = list_csvs_from_manifest(DATA_FOLDER)
+            if github_csvs:
+                selected_file = st.sidebar.selectbox("Choose CSV from GitHub", github_csvs)
+                if selected_file:
+                    raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
+                    try:
+                        df = pd.read_csv(raw_url)
+                        fake_file = type('FakeUpload', (), {'name': selected_file})
+                        uploaded_files.append(fake_file)
+                        st.session_state['datasets'][selected_file] = df
+                        if selected_file not in st.session_state['predictions']:
+                            st.session_state['predictions'][selected_file] = []
+                        st.success(f"✅ Loaded from GitHub: {selected_file}")
+                    except Exception as e:
+                        st.error(f"Error loading CSV: {e}")
+            else:
+                st.warning("No CSV files found in GitHub folder.")
+                
+        for uploaded_file in uploaded_files:
+            if uploaded_file.name not in st.session_state['datasets']:
+                df = pd.read_csv(uploaded_file)
+                st.session_state['datasets'][uploaded_file.name] = df
+                if uploaded_file.name not in st.session_state['predictions']:
+                    st.session_state['predictions'][uploaded_file.name] = []
 
-    st.header(f"Prediction Summary based on {clean_name}")
-    if preds := st.session_state['predictions'][selected_dataset_name]:
-        df_preds = pd.DataFrame(preds)
-        num_cols = df_preds.select_dtypes(include=[np.number]).columns
-        df_preds_display = df_preds.copy()
-        for col in num_cols:
-            df_preds_display[col] = df_preds_display[col].apply(lambda x: format_with_commas(x))
-        st.dataframe(df_preds_display, use_container_width=True)
-        towrite = io.BytesIO()
-        df_preds.to_excel(towrite, index=False, engine='openpyxl')
-        towrite.seek(0)
-        st.download_button(
-            "Download Predictions as Excel",
-            data=towrite,
-            file_name=f"{selected_dataset_name}_predictions.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        # Add horizontal line in sidebar
+        st.sidebar.markdown('---')
+        
+        if st.sidebar.checkbox("🧹 Cleanup Current Session", value=False,
+                               help="Enable this if you want to remove datasets not uploaded in this session."):
+            uploaded_names = {f.name for f in uploaded_files}
+            for name in list(st.session_state['datasets'].keys()):
+                if name not in uploaded_names:
+                    del st.session_state['datasets'][name]
+                    st.session_state['predictions'].pop(name, None)
+                    
+        if not st.session_state['datasets']:
+            st.write("Please upload one or more CSV files to begin.")
+            return
+
+        selected_dataset_name = st.sidebar.selectbox(
+            "Select a dataset for prediction",
+            list(st.session_state['datasets'].keys())
         )
-    else:
-        st.write("No predictions available.")
+        df = st.session_state['datasets'][selected_dataset_name]
+        clean_name = selected_dataset_name.replace('.csv', '')
+        st.subheader(f"📊 Metrics: {clean_name}")
 
-if __name__ == '__main__':
-    main()
+        currency = get_currency_symbol(df)
+        
+        # Store the first column separately for project names
+        project_names = df.iloc[:, 0] if len(df.columns) > 0 else pd.Series()
+        
+        # Use all columns except the first one for the model
+        # The last column is still the target, but now we start from column 1
+        df_model = df.iloc[:, 1:] if len(df.columns) > 1 else df
+        
+        imputer = KNNImputer(n_neighbors=5)
+        df_imputed = pd.DataFrame(imputer.fit_transform(df_model), columns=df_model.columns)
+        
+        # Minimized collapse for Data Overview
+        with st.expander('Data Overview', expanded=False):
+            st.header('Data Overview')
+            # Show only the modeling data (without project names)
+            st.write('Dataset Shape:', df_imputed.shape)
+            st.dataframe(df_imputed.head())
+
+        # X includes all columns except the first (project name) and the last (target)
+        # y is still the last column
+        X = df_imputed.iloc[:, :-1]
+        y = df_imputed.iloc[:, -1]
+        target_column = y.name
+
+        # Minimized collapse for Model Training and Performance
+        with st.expander('Model Training and Performance', expanded=False):
+            st.header('Model Training and Performance')
+            test_size = st.slider('Select test size (0.0-1.0)', 0.1, 1.0, 0.2)
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+            scaler = MinMaxScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            rf_model = RandomForestRegressor(random_state=42)
+            rf_model.fit(X_train_scaled, y_train)
+            y_pred = rf_model.predict(X_test_scaled)
+
+            # st.header('Model Performance')
+            rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+            r2 = r2_score(y_test, y_pred)
+            col1, col2 = st.columns(2)
+            col1.metric('RMSE', f'{rmse:,.2f}')
+            col2.metric('R² Score', f'{r2:.2f}')
+
+        # Minimized collapse for Data Visualization
+        with st.expander('Data Visualization', expanded=False):
+            st.subheader('Correlation Matrix')
+            feature_count = len(X.columns)
+            corr_height = min(9, max(7, feature_count * 0.5))
+            
+            # Create correlation matrix from the imputed data
+            df_for_corr = pd.concat([X, y], axis=1)
+            fig, ax = plt.subplots(figsize=(8, corr_height))
+            sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+            st.subheader('Feature Importance')
+            fi_height = min(8, max(4, feature_count * 0.3))
+            fig, ax = plt.subplots(figsize=(8, fi_height))
+            importance_df = pd.DataFrame({
+                'feature': X.columns,
+                'importance': rf_model.feature_importances_
+            }).sort_values('importance', ascending=False)
+            sns.barplot(data=importance_df, x='importance', y='feature')
+            plt.title('Feature Importance')
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+            st.subheader('Cost Curve (Original Data Only)')
+            feature = st.selectbox('Select feature for cost curve (Data Visualization)', X.columns, key='cost_curve_feature_viz')
+            fig, ax = plt.subplots(figsize=(7, 6))
+            x_vals = df_imputed[feature].values
+            y_vals = y.values
+            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+            if mask.sum() >= 2:
+                slope, intercept, r_val, _, _ = linregress(x_vals[mask], y_vals[mask])
+                sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
+                x_line = np.linspace(min(x_vals[mask]), max(x_vals[mask]), 100)
+                y_line = slope * x_line + intercept
+                ax.plot(x_line, y_line, color='red', label=f'Fit: y = {slope:.2f} * x + {intercept:.2f}')
+                ax.text(0.05, 0.95, f'$R^2$ = {r_val**2:.3f}', transform=ax.transAxes,
+                        verticalalignment='top', bbox=dict(facecolor='white', alpha=0.5))
+            else:
+                sns.scatterplot(x=x_vals, y=y_vals, label='Original Data', ax=ax)
+                st.warning("Not enough data for regression.")
+            ax.set_xlabel(feature)
+            ax.set_ylabel(target_column)
+            ax.set_title(f'Cost Curve: {feature} vs {target_column}')
+            ax.legend()
+            ax.xaxis.set_major_formatter(FuncFormatter(human_format))
+            ax.yaxis.set_major_formatter(FuncFormatter(human_format))
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+
+        # Minimized/collapsible Cost Breakdown Configuration
+        with st.expander('Cost Breakdown Configuration', expanded=False):
+            st.header('Cost Breakdown Configuration')
+            st.subheader("🔧 Cost Breakdown Percentage Input")
+            st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
+            epcic_percentages = {}
+            col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
+            epcic_percentages["Engineering"] = col_ep1.number_input("Engineering (%)", min_value=0.0, max_value=100.0, value=0.0, key="eng")
+            epcic_percentages["Procurement"] = col_ep2.number_input("Procurement (%)", min_value=0.0, max_value=100.0, value=0.0, key="proc")
+            epcic_percentages["Construction"] = col_ep3.number_input("Construction (%)", min_value=0.0, max_value=100.0, value=0.0, key="const")
+            epcic_percentages["Installation"] = col_ep4.number_input("Installation (%)", min_value=0.0, max_value=100.0, value=0.0, key="inst")
+            epcic_percentages["Commissioning"] = col_ep5.number_input("Commissioning (%)", min_value=0.0, max_value=100.0, value=0.0, key="comm")
+            epcic_total = sum(epcic_percentages.values())
+            if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
+                st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
+            st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
+            st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
+            st.markdown("")
+            col_pd1, col_pd2 = st.columns(2)
+            predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0, key="predev")
+            owners_percentage = col_pd2.number_input("Enter Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, key="owner")
+            col_cont1, col_cont2 = st.columns(2)
+            with col_cont1:
+                st.subheader("⚠️ Cost Contingency Input")
+                st.markdown("")
+                contingency_percentage = st.number_input("Enter Cost Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, key="cont")
+            with col_cont2:
+                st.subheader("📈 Escalation & Inflation Percentage Input")
+                st.markdown("")
+                escalation_percentage = st.number_input("Enter Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0, key="esc")
+            st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
+
+        st.header('Make New Predictions')
+        project_name = st.text_input('Enter Project Name')
+        num_features = len(X.columns)
+        if num_features <= 2:
+            cols = st.columns(num_features)
+        else:
+            cols = []
+            for i in range(0, num_features, 2):
+                row_cols = st.columns(min(2, num_features - i))
+                cols.extend(row_cols)
+        new_data = {}
+        for i, col in enumerate(X.columns):
+            col_idx = i % len(cols) if len(cols) > 0 else 0
+            user_val = cols[col_idx].text_input(f'{col}', key=f'input_{col}')
+            if user_val.strip().lower() == "nan" or user_val.strip() == "":
+                new_data[col] = np.nan
+            else:
+                try:
+                    new_data[col] = float(user_val)
+                except ValueError:
+                    new_data[col] = np.nan
+
+        if st.button('Predict'):
+            df_input = pd.DataFrame([new_data])
+            input_scaled = scaler.transform(df_input)
+            pred = rf_model.predict(input_scaled)[0]
+            result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
+            epcic_breakdown = {}
+            for phase, percent in epcic_percentages.items():
+                cost = round(pred * (percent / 100), 2)
+                result[f"{phase} Cost"] = cost
+                epcic_breakdown[phase] = {'cost': cost, 'percentage': percent}
+            predev_cost = round(pred * (predev_percentage / 100), 2)
+            owners_cost = round(pred * (owners_percentage / 100), 2)
+            result["Pre-Development Cost"] = predev_cost
+            result["Owner's Cost"] = owners_cost
+            contingency_base = pred + owners_cost
+            contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
+            result["Cost Contingency"] = contingency_cost
+            escalation_base = pred + owners_cost
+            escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
+            result["Escalation & Inflation"] = escalation_cost
+            grand_total = round(pred + owners_cost + contingency_cost + escalation_cost, 2)
+            result["Grand Total"] = grand_total
+            st.session_state['predictions'][selected_dataset_name].append(result)
+            display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
+            has_breakdown = any(data['percentage'] > 0 for data in epcic_breakdown.values()) or \
+                           predev_percentage > 0 or owners_percentage > 0 or \
+                           contingency_percentage > 0 or escalation_percentage > 0
+            if has_breakdown:
+                for phase, data in epcic_breakdown.items():
+                    if data['percentage'] > 0:
+                        display_text += f"• {phase} ({data['percentage']:.1f}%): {format_currency(data['cost'], currency)}\n\n"
+                if predev_percentage > 0:
+                    display_text += f"**Pre-Development ({predev_percentage:.1f}%):** {format_currency(predev_cost, currency)}\n\n"
+                if owners_percentage > 0:
+                    display_text += f"**Owner's Cost ({owners_percentage:.1f}%):** {format_currency(owners_cost, currency)}\n\n"
+                if contingency_percentage > 0:
+                    display_text += f"**Contingency ({contingency_percentage:.1f}%):** {format_currency(contingency_cost, currency)}\n\n"
+                if escalation_percentage > 0:
+                    display_text += f"**Escalation & Inflation ({escalation_percentage:.3f}%):** {format_currency(escalation_cost, currency)}\n\n"
+            display_text += f"**Grand Total:** {format_currency(grand_total, currency)}"
+            st.success(display_text)
+
+        st.write("Or upload an Excel file:")
+        excel_file = st.file_uploader("Upload Excel file", type=["xlsx"])
+        if excel_file:
+            file_id = f"{excel_file.name}_{excel_file.size}_{selected_dataset_name}"
+            if file_id not in st.session_state['processed_excel_files']:
+                batch_df = pd.read_excel(excel_file)
+                
+                # Skip the first column (assuming it's project names/identifiers)
+                if len(batch_df.columns) > 1:
+                    batch_features = batch_df.iloc[:, 1:]  # Skip first column
+                    # Ensure we have the right columns for prediction
+                    if set(X.columns).issubset(batch_features.columns):
+                        scaled = scaler.transform(batch_features[X.columns])
+                        preds = rf_model.predict(scaled)
+                        
+                        for i, row in batch_df.iterrows():
+                            # Use the first column as project name
+                            name = row.iloc[0] if not pd.isna(row.iloc[0]) else f"Project {i+1}"
+                            entry = {'Project Name': str(name)}
+                            
+                            # Add the feature values (skip the first column)
+                            for feature in X.columns:
+                                entry[feature] = row[feature] if feature in row else np.nan
+                            
+                            entry[target_column] = round(preds[i], 2)
+                            
+                            # Add cost breakdown
+                            for phase, percent in epcic_percentages.items():
+                                cost = round(preds[i] * (percent / 100), 2)
+                                entry[f"{phase} Cost"] = cost
+                            
+                            predev_cost = round(preds[i] * (predev_percentage / 100), 2)
+                            owners_cost = round(preds[i] * (owners_percentage / 100), 2)
+                            entry["Pre-Development Cost"] = predev_cost
+                            entry["Owner's Cost"] = owners_cost
+                            
+                            contingency_base = preds[i] + owners_cost
+                            contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
+                            entry["Cost Contingency"] = contingency_cost
+                            
+                            escalation_base = preds[i] + owners_cost
+                            escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
+                            entry["Escalation & Inflation"] = escalation_cost
+                            
+                            grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
+                            entry["Grand Total"] = grand_total
+                            
+                            st.session_state['predictions'][selected_dataset_name].append(entry)
+                        
+                        st.session_state['processed_excel_files'].add(file_id)
+                        st.success("Batch prediction successful!")
+                    else:
+                        st.error(f"Excel missing required columns. Needed: {list(X.columns)}")
+                else:
+                    st.error("Excel file must have at least 2 columns (project name + features)")
+
+        with st.expander('Simplified Project List', expanded=True):
+            preds = st.session_state['predictions'][selected_dataset_name]
+            if preds:
+                if st.button('Delete All', key='delete_all'):
+                    st.session_state['predictions'][selected_dataset_name] = []
+                    to_remove = {fid for fid in st.session_state['processed_excel_files'] if fid.endswith(selected_dataset_name)}
+                    for fid in to_remove:
+                        st.session_state['processed_excel_files'].remove(fid)
+                    st.rerun()
+                for i, p in enumerate(preds):
+                    c1, c2 = st.columns([3, 1])
+                    c1.write(p['Project Name'])
+                    if c2.button('Delete', key=f'del_{i}'):
+                        preds.pop(i)
+                        st.rerun()
+            else:
+                st.write("No predictions yet.")
+
+        st.header(f"Prediction Summary based on {clean_name}")
+        if preds := st.session_state['predictions'][selected_dataset_name]:
+            df_preds = pd.DataFrame(preds)
+            num_cols = df_preds.select_dtypes(include=[np.number]).columns
+            df_preds_display = df_preds.copy()
+            for col in num_cols:
+                df_preds_display[col] = df_preds_display[col].apply(lambda x: format_with_commas(x))
+            st.dataframe(df_preds_display, use_container_width=True)
+            towrite = io.BytesIO()
+            df_preds.to_excel(towrite, index=False, engine='openpyxl')
+            towrite.seek(0)
+            st.download_button(
+                "Download Predictions as Excel",
+                data=towrite,
+                file_name=f"{selected_dataset_name}_predictions.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        else:
+            st.write("No predictions available.")
+
+    # =======================================================================================
+    # PROJECT BUILDER TAB
+    # =======================================================================================
+    with tab_pb:
+        st.markdown('<h4 style="margin:0;color:#000;">Project Builder</h4><p>Assemble multi-component CAPEX projects</p>', unsafe_allow_html=True)
+
+        if not st.session_state.datasets:
+            st.info("No dataset. Go to **Data** tab to upload or load.")
+            st.stop()
+
+        colA, colB = st.columns([2, 1])
+        with colA:
+            new_project_name = st.text_input("New Project Name", placeholder="e.g., CAPEX 2025", key="pb_new_project_name")
+        with colB:
+            if new_project_name and new_project_name not in st.session_state.projects:
+                if st.button("Create Project", key="pb_create_project_btn"):
+                    st.session_state.projects[new_project_name] = {"components": [], "totals": {}, "currency": ""}
+                    st.success(f"Project '{new_project_name}' created.")
+                    st.rerun()
+
+        if not st.session_state.projects:
+            st.info("Create a project above, then add components.")
+            st.stop()
+
+        existing_projects = list(st.session_state.projects.keys())
+        proj_sel = st.selectbox("Select project to work on", existing_projects, key="pb_project_select")
+
+        ds_names = sorted(st.session_state.datasets.keys())
+        dataset_for_comp = st.selectbox("Dataset for this component", ds_names, key="pb_dataset_for_component")
+        df_comp = st.session_state.datasets[dataset_for_comp]
+
+        # Get target column (last column)
+        df_model_comp = df_comp.iloc[:, 1:] if len(df_comp.columns) > 1 else df_comp
+        imputer_comp = KNNImputer(n_neighbors=5)
+        df_imputed_comp = pd.DataFrame(imputer_comp.fit_transform(df_model_comp), columns=df_model_comp.columns)
+        X_comp = df_imputed_comp.iloc[:, :-1]
+        y_comp = df_imputed_comp.iloc[:, -1]
+        target_column_comp = y_comp.name
+        
+        curr_ds = get_currency_symbol(df_comp)
+        
+        # Train model for this dataset
+        X_train_comp, X_test_comp, y_train_comp, y_test_comp = train_test_split(X_comp, y_comp, test_size=0.2, random_state=42)
+        scaler_comp = MinMaxScaler()
+        X_train_scaled_comp = scaler_comp.fit_transform(X_train_comp)
+        X_test_scaled_comp = scaler_comp.transform(X_test_comp)
+        rf_model_comp = RandomForestRegressor(random_state=42)
+        rf_model_comp.fit(X_train_scaled_comp, y_train
