@@ -1,0 +1,7 @@
+# Logs
+login_logs/
+*.log
+*.csv
+
+# Streamlit
+.streamlit/secrets.toml
