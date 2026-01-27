@@ -507,17 +507,19 @@ def main():
         st.header('Make New Predictions')
         project_name = st.text_input('Enter Project Name')
         num_features = len(X.columns)
-        if num_features <= 2:
-            cols = st.columns(num_features)
-        else:
-            cols = []
-            for i in range(0, num_features, 2):
-                row_cols = st.columns(min(2, num_features - i))
-                cols.extend(row_cols)
-        new_data = {}
-        for i, col in enumerate(X.columns):
-            col_idx = i % len(cols) if len(cols) > 0 else 0
-            user_val = cols[col_idx].text_input(f'{col}', key=f'input_{col}')
+
+        st.markdown("**Feature Inputs**")
+        st.markdown("Provide feature values (1 row). Leave blank for NaN.")
+
+        # Create a dataframe with one row for editing
+        input_key = f"input_row__{selected_dataset_name}"
+        if input_key not in st.session_state:
+            st.session_state[input_key] = {col: np.nan for col in X.columns}
+
+        input_row_df = pd.DataFrame([st.session_state[input_key]], columns=X.columns)
+        edited_df = st.data_editor(input_row_df, num_rows="fixed", use_container_width=True, key=f"pred_editor_{selected_dataset_name}")
+        new_data = edited_df.iloc[0].to_dict()
+            
             if user_val.strip().lower() == "nan" or user_val.strip() == "":
                 new_data[col] = np.nan
             else:
@@ -1028,6 +1030,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
