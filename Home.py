@@ -246,7 +246,7 @@ st.markdown(f"""
 # ----------------------------
 # Logo (float animation)
 # ----------------------------
-# logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
+logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
 st.markdown(
     f"""
     <div style="display:flex; justify-content:center; align-items:center; margin: 0.6rem 0 0.4rem 0;">
