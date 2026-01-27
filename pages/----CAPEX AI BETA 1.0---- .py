@@ -182,16 +182,25 @@ def project_components_df(proj):
     comps = proj.get("components", [])
     rows = []
     for c in comps:
+        # Safely get the breakdown dictionary
+        breakdown = c.get("breakdown", {})
+        
+        # For backward compatibility, check both old and new keys
+        # Some older projects might have "sst_cost" instead of "predev_cost"
+        predev_cost = breakdown.get("predev_cost")
+        if predev_cost is None:
+            predev_cost = breakdown.get("sst_cost", 0.0)  # Try old key
+        
         rows.append(
             {
-                "Component": c["component_type"],
-                "Dataset": c["dataset"],
-                "Base CAPEX": float(c["prediction"]),
-                "Owner's Cost": float(c["breakdown"]["owners_cost"]),
-                "Contingency": float(c["breakdown"]["contingency_cost"]),
-                "Escalation": float(c["breakdown"]["escalation_cost"]),
-                "Pre-Development": float(c["breakdown"]["predev_cost"]),
-                "Grand Total": float(c["breakdown"]["grand_total"]),
+                "Component": c.get("component_type", "Unknown"),
+                "Dataset": c.get("dataset", "Unknown"),
+                "Base CAPEX": float(c.get("prediction", 0.0)),
+                "Owner's Cost": float(breakdown.get("owners_cost", 0.0)),
+                "Contingency": float(breakdown.get("contingency_cost", 0.0)),
+                "Escalation": float(breakdown.get("escalation_cost", 0.0)),
+                "Pre-Development": float(predev_cost),  # Fixed with fallback
+                "Grand Total": float(breakdown.get("grand_total", 0.0)),
             }
         )
     return pd.DataFrame(rows)
@@ -693,6 +702,18 @@ def main():
                     st.success(f"Project '{new_project_name}' created.")
                     st.rerun()
 
+        # ============ ADD THIS CLEANUP SECTION HERE ============
+        st.markdown("---")
+        st.markdown("#### 🧹 Data Cleanup")
+        if st.button("🔄 Clear Session & Fix Data Issues", key="pb_clear_session"):
+            # Clear only problematic data
+            st.session_state.projects = {}
+            st.session_state.component_labels = {}
+            st.session_state.widget_nonce += 1
+            st.success("✅ Session cleared! Old project data removed. Please create new projects.")
+            st.rerun()
+        # ======================================================
+
         if not st.session_state.projects:
             st.info("Create a project above, then add components.")
             st.stop()
@@ -1039,3 +1060,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
