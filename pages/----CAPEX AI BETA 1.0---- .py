@@ -506,10 +506,6 @@ def main():
 
         st.header('Make New Predictions')
         project_name = st.text_input('Enter Project Name')
-        num_features = len(X.columns)
-
-        st.header('Make New Predictions')
-        project_name = st.text_input('Enter Project Name')
         
         # NEW: Table form like Component Feature Inputs
         st.markdown("**Feature Inputs**")
@@ -1029,6 +1025,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
