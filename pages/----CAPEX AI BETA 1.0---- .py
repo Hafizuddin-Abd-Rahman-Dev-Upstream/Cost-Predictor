@@ -971,7 +971,7 @@ def main():
         with col_t3:
             st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
-        with st.expander("📊 Component Cost Composition", expanded=True):
+        with st.expander("📊 Component Cost Composition", expanded=False):
             st.markdown("#### Component Cost Composition")
             df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
             df_cost = df_cost.rename(columns={
@@ -1061,6 +1061,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
