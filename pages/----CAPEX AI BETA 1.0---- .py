@@ -971,39 +971,40 @@ def main():
         with col_t3:
             st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
-        st.markdown("#### Component Cost Composition")
-        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
-        df_cost = df_cost.rename(columns={
-            "Base CAPEX": "CAPEX", 
-            "Owner's Cost": "Owner",
-            "Cost Contingency": "Contingency",
-            "Escalation & Inflation": "Escalation",
-            "Pre-Development Cost": "Pre-Development"
-        })
-        df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-        fig_stack = plt.figure(figsize=(10, 6))
-        ax = fig_stack.add_subplot(111)
-        
-        # Create stacked bar chart
-        categories = df_cost["Component"].unique()
-        bottom = np.zeros(len(categories))
-        
-        for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
-            values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
-            ax.bar(categories, values, bottom=bottom, label=cost_type)
-            bottom += values
-        
-        ax.set_ylabel(f"Cost ({curr})")
-        ax.set_xlabel("Component")
-        ax.set_title("Cost Composition by Component")
-        ax.legend()
-        ax.tick_params(axis='x', rotation=45)
-        
-        # Format y-axis with human readable format
-        ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-        
-        plt.tight_layout()
-        st.pyplot(fig_stack)
+        with st.expander("📊 Component Cost Composition", expanded=True):
+            st.markdown("#### Component Cost Composition")
+            df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
+            df_cost = df_cost.rename(columns={
+                "Base CAPEX": "CAPEX", 
+                "Owner's Cost": "Owner",
+                "Cost Contingency": "Contingency",
+                "Escalation & Inflation": "Escalation",
+                "Pre-Development Cost": "Pre-Development"
+            })
+            df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
+            fig_stack = plt.figure(figsize=(10, 6))
+            ax = fig_stack.add_subplot(111)
+            
+            # Create stacked bar chart
+            categories = df_cost["Component"].unique()
+            bottom = np.zeros(len(categories))
+            
+            for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
+                values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
+                ax.bar(categories, values, bottom=bottom, label=cost_type)
+                bottom += values
+            
+            ax.set_ylabel(f"Cost ({curr})")
+            ax.set_xlabel("Component")
+            ax.set_title("Cost Composition by Component")
+            ax.legend()
+            ax.tick_params(axis='x', rotation=45)
+            
+            # Format y-axis with human readable format
+            ax.yaxis.set_major_formatter(FuncFormatter(human_format))
+            
+            plt.tight_layout()
+            st.pyplot(fig_stack)
 
         st.markdown("#### Components")
         for idx, c in enumerate(comps):
@@ -1060,6 +1061,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
