@@ -989,6 +989,7 @@ def main():
         with col_t3:
             st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
+        """
         with st.expander("📊 Component Cost Composition", expanded=False):
             st.markdown("#### Component Cost Composition")
             
@@ -1094,6 +1095,7 @@ def main():
             
             plt.tight_layout()
             st.pyplot(fig_stack)
+        """
 
         st.markdown("#### Components")
         for idx, c in enumerate(comps):
@@ -1150,4 +1152,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
