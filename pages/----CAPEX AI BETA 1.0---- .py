@@ -908,31 +908,69 @@ def main():
             st.info("No components yet. Add at least one above.")
             st.stop()
 
-        # Create DataFrame with all component data
+        # Create DataFrame with all component data - EXACT FORMAT AS PREDICTION SUMMARY
         rows = []
-        for c in comps:
+        for idx, c in enumerate(comps):
+            breakdown = c.get("breakdown", {})
+            epcic_costs = breakdown.get("epcic_costs", {})
+            inputs = c.get("inputs", {})
+            
             row = {
-                "Component": c["component_type"],
-                "Dataset": c["dataset"],
-                "Model": c.get("model_used", "RandomForest"),
-                "Base CAPEX": float(c["prediction"])
+                "Component": c.get("component_type", f"Component {idx+1}"),
+                "Dataset": c.get("dataset", "Unknown"),
             }
             
-            # Add EPCIC breakdown costs
-            epcic_costs = c["breakdown"].get("epcic_costs", {})
+            # 1. Add all input features FIRST (like Prediction Summary)
+            for feature_name, feature_value in inputs.items():
+                if pd.notna(feature_value):
+                    row[feature_name] = float(feature_value)
+            
+            # 2. Add Base CAPEX (this is like the target_column in Prediction Summary)
+            row["Base CAPEX"] = float(c.get("prediction", 0.0))
+            
+            # 3. Add EPCIC costs (Engineering Cost, Procurement Cost, etc.)
             for phase, cost in epcic_costs.items():
                 row[f"{phase} Cost"] = float(cost)
             
-            # Add other cost breakdowns
-            row["Pre-Development Cost"] = float(c["breakdown"].get("predev_cost", 0.0))
-            row["Owner's Cost"] = float(c["breakdown"].get("owners_cost", 0.0))
-            row["Cost Contingency"] = float(c["breakdown"].get("contingency_cost", 0.0))
-            row["Escalation & Inflation"] = float(c["breakdown"].get("escalation_cost", 0.0))
-            row["Grand Total"] = float(c["breakdown"].get("grand_total", 0.0))
+            # 4. Add other cost breakdowns
+            row["Pre-Development Cost"] = float(breakdown.get("predev_cost", 0.0))
+            row["Owner's Cost"] = float(breakdown.get("owners_cost", 0.0))
+            row["Cost Contingency"] = float(breakdown.get("contingency_cost", 0.0))
+            row["Escalation & Inflation"] = float(breakdown.get("escalation_cost", 0.0))
+            
+            # 5. Add Grand Total at the end
+            row["Grand Total"] = float(breakdown.get("grand_total", 0.0))
             
             rows.append(row)
         
         dfc = pd.DataFrame(rows)
+        
+        # Reorder columns to match Prediction Summary pattern: Component, features, Base CAPEX, costs, Grand Total
+        # This puts features first, then Base CAPEX, then EPCIC costs, then other costs
+        column_order = []
+        
+        # Start with Component and Dataset
+        if "Component" in dfc.columns:
+            column_order.append("Component")
+        if "Dataset" in dfc.columns:
+            column_order.append("Dataset")
+        
+        # Add all feature columns (not containing "Cost" or "Total")
+        feature_cols = [col for col in dfc.columns if col not in column_order and 
+                       "Cost" not in col and "Total" not in col and col != "Base CAPEX"]
+        column_order.extend(sorted(feature_cols))
+        
+        # Add Base CAPEX
+        if "Base CAPEX" in dfc.columns:
+            column_order.append("Base CAPEX")
+        
+        # Add all other cost columns
+        cost_cols = [col for col in dfc.columns if col not in column_order and 
+                    ("Cost" in col or "Total" in col)]
+        column_order.extend(sorted(cost_cols))
+        
+        # Reorder dataframe
+        dfc = dfc[column_order]
         curr = proj.get("currency", "") or curr_ds
 
         # Display the table
@@ -1061,6 +1099,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
