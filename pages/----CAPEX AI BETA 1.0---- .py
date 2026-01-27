@@ -13,7 +13,6 @@ import io
 import requests
 from matplotlib.ticker import FuncFormatter
 import json
-import zipfile
 
 #Hide Streamlit header icons (commented out, not executed)
 #st.markdown("""
@@ -259,8 +258,8 @@ def main():
     if 'widget_nonce' not in st.session_state:
         st.session_state.widget_nonce = 0
     
-    # Create tabs
-    tab_data, tab_pb, tab_compare = st.tabs(["📊 Data", "🏗️ Project Builder", "🔀 Compare Projects"])
+    # Create tabs - REMOVED COMPARE PROJECTS TAB
+    tab_data, tab_pb = st.tabs(["📊 Data", "🏗️ Project Builder"])
     
     # =======================================================================================
     # DATA TAB
@@ -690,4 +689,203 @@ def main():
         X_train_scaled_comp = scaler_comp.fit_transform(X_train_comp)
         X_test_scaled_comp = scaler_comp.transform(X_test_comp)
         rf_model_comp = RandomForestRegressor(random_state=42)
-        rf_model_comp.fit(X_train_scaled_comp, y_train
+        rf_model_comp.fit(X_train_scaled_comp, y_train_comp)
+
+        default_label = st.session_state.component_labels.get(dataset_for_comp, "")
+        component_type = st.text_input(
+            "Component type (Asset / Scope)",
+            value=(default_label or "Platform / Pipeline / Subsea / Well"),
+            key=f"pb_component_type_{proj_sel}",
+        )
+
+        st.markdown("**Component Feature Inputs (1 row)**")
+        comp_input_key = f"pb_input_row__{proj_sel}__{dataset_for_comp}"
+        if comp_input_key not in st.session_state:
+            st.session_state[comp_input_key] = {c: np.nan for c in X_comp.columns}
+
+        comp_row_df = pd.DataFrame([st.session_state[comp_input_key]], columns=X_comp.columns)
+        comp_editor_key = f"pb_editor__{proj_sel}__{dataset_for_comp}__{st.session_state.widget_nonce}"
+        comp_edited = st.data_editor(comp_row_df, num_rows="fixed", use_container_width=True, key=comp_editor_key)
+        comp_payload = comp_edited.iloc[0].to_dict()
+
+        st.markdown("---")
+        st.markdown("**WBS Level 1**")
+        cp1, cp2 = st.columns(2)
+        with cp1:
+            st.markdown("use +/-")
+            eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
+            procurement_pb = st.number_input("Procurement", 0.0, 100.0, 33.0, 1.0, key=f"pb_procurement_{proj_sel}")
+            fabrication_pb = st.number_input("Fabrication/Construction", 0.0, 100.0, 33.0, 1.0, key=f"pb_fabrication_{proj_sel}")
+            ti_pb = st.number_input("Transportation & Installation (T&I)", 0.0, 100.0, 22.0, 1.0, key=f"pb_ti_{proj_sel}")
+
+            eprr_pb = {"Engineering": eng_pb, "Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
+            eprr_total_pb = sum(eprr_pb.values())
+            st.caption(f"WBS total: **{eprr_total_pb:.2f}%**")
+
+        with cp2:
+            st.markdown("use +/-")
+            sst_pb = st.number_input("SST", 0.0, 100.0, 0.0, 0.5, key=f"pb_sst_{proj_sel}")
+            owners_pb = st.number_input("Owner's Cost", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
+            cont_pb = st.number_input("Contingency", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
+            esc_pb = st.number_input("Escalation & Inflation", 0.0, 100.0, 0.0, 0.5, key=f"pb_esc_{proj_sel}")
+
+        if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
+            try:
+                base_pred = single_prediction(rf_model_comp, scaler_comp, list(X_comp.columns), comp_payload)
+                owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
+                    base_pred, eprr_pb, sst_pb, owners_pb, cont_pb, esc_pb
+                )
+
+                comp_entry = {
+                    "component_type": component_type or default_label or "Component",
+                    "dataset": dataset_for_comp,
+                    "model_used": "RandomForest",
+                    "inputs": {k: comp_payload.get(k, np.nan) for k in X_comp.columns},
+                    "feature_cols": list(X_comp.columns),
+                    "prediction": base_pred,
+                    "breakdown": {
+                        "eprr_costs": eprr_costs,
+                        "eprr_pct": eprr_pb,
+                        "sst_cost": sst_cost,
+                        "owners_cost": owners_cost,
+                        "contingency_cost": contingency_cost,
+                        "escalation_cost": escalation_cost,
+                        "grand_total": grand_total,
+                        "target_col": target_column_comp,
+                        "sst_pct": float(sst_pb),
+                        "owners_pct": float(owners_pb),
+                        "cont_pct": float(cont_pb),
+                        "esc_pct": float(esc_pb),
+                    },
+                }
+
+                st.session_state.projects[proj_sel]["components"].append(comp_entry)
+                st.session_state.component_labels[dataset_for_comp] = component_type or default_label
+                st.session_state.projects[proj_sel]["currency"] = curr_ds
+
+                st.session_state.widget_nonce += 1
+                st.success(f"Component added to project '{proj_sel}'.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to add component: {e}")
+
+        st.markdown("---")
+        st.markdown("### Current Project Overview")
+
+        proj = st.session_state.projects[proj_sel]
+        comps = proj.get("components", [])
+        if not comps:
+            st.info("No components yet. Add at least one above.")
+            st.stop()
+
+        dfc = project_components_df(proj)
+        curr = proj.get("currency", "") or curr_ds
+
+        st.dataframe(
+            dfc.style.format(
+                {
+                    "Base CAPEX": "{:,.2f}",
+                    "Owner's Cost": "{:,.2f}",
+                    "Contingency": "{:,.2f}",
+                    "Escalation": "{:,.2f}",
+                    "SST": "{:,.2f}",
+                    "Grand Total": "{:,.2f}",
+                }
+            ),
+            use_container_width=True,
+        )
+
+        t = project_totals(proj)
+        proj["totals"] = {"capex_sum": t["capex_sum"], "grand_total": t["grand_total"]}
+
+        col_t1, col_t2, col_t3 = st.columns(3)
+        with col_t1:
+            st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
+        with col_t2:
+            st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
+        with col_t3:
+            st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
+
+        st.markdown("#### Component Cost Composition")
+        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Contingency", "Escalation", "SST"]].copy()
+        df_cost = df_cost.rename(columns={"Base CAPEX": "CAPEX", "Owner's Cost": "Owner"})
+        df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
+        fig_stack = plt.figure(figsize=(10, 6))
+        ax = fig_stack.add_subplot(111)
+        
+        # Create stacked bar chart
+        categories = df_cost["Component"].unique()
+        bottom = np.zeros(len(categories))
+        
+        for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "SST"]:
+            values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
+            ax.bar(categories, values, bottom=bottom, label=cost_type)
+            bottom += values
+        
+        ax.set_ylabel(f"Cost ({curr})")
+        ax.set_xlabel("Component")
+        ax.set_title("Cost Composition by Component")
+        ax.legend()
+        ax.tick_params(axis='x', rotation=45)
+        
+        # Format y-axis with human readable format
+        ax.yaxis.set_major_formatter(FuncFormatter(human_format))
+        
+        plt.tight_layout()
+        st.pyplot(fig_stack)
+
+        st.markdown("#### Components")
+        for idx, c in enumerate(comps):
+            col1, col2, col3 = st.columns([4, 2, 1])
+            with col1:
+                st.write(f"**{c['component_type']}** — *{c['dataset']}* — {c.get('model_used', 'N/A')}")
+            with col2:
+                st.write(f"Grand Total: {curr} {c['breakdown']['grand_total']:,.2f}")
+            with col3:
+                if st.button("🗑️", key=f"pb_del_comp_{proj_sel}_{idx}"):
+                    comps.pop(idx)
+                    st.session_state.widget_nonce += 1
+                    st.success("Component removed.")
+                    st.rerun()
+
+        st.markdown("---")
+        st.markdown("#### Export / Import Project")
+
+        col_dl1, col_dl2, col_dl3 = st.columns(3)
+
+        with col_dl1:
+            excel_report = create_project_excel_report_capex(proj_sel, proj, curr)
+            st.download_button(
+                "⬇️ Download Project Excel",
+                data=excel_report,
+                file_name=f"{proj_sel}_CAPEX_Report.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key=f"pb_dl_excel_{proj_sel}",
+            )
+
+        with col_dl2:
+            st.download_button(
+                "⬇️ Download Project (JSON)",
+                data=json.dumps(proj, indent=2, default=float),
+                file_name=f"{proj_sel}.json",
+                mime="application/json",
+                key=f"pb_dl_json_{proj_sel}",
+            )
+
+        with col_dl3:
+            # For PowerPoint export, you can add it later if needed
+            st.info("PowerPoint export available in full version")
+
+        up_json = st.file_uploader("Import project JSON", type=["json"], key=f"pb_import_{proj_sel}__{st.session_state.widget_nonce}")
+        if up_json is not None:
+            try:
+                data = json.load(up_json)
+                st.session_state.projects[proj_sel] = data
+                st.session_state.widget_nonce += 1
+                st.success("Project imported successfully.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Failed to import project JSON: {e}")
+
+if __name__ == '__main__':
+    main()
