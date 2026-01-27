@@ -121,9 +121,22 @@ def format_currency(amount, currency=''):
     return f"{currency} {amount:.2f}"
 
 def download_all_predictions():
-    if not st.session_state['predictions'] or all(len(preds) == 0 for preds in st.session_state['predictions'].values()):
+    # Safe check for predictions
+    if 'predictions' not in st.session_state or not st.session_state['predictions']:
         st.sidebar.error("No predictions available to download")
         return
+    
+    # Check if any dataset actually has predictions
+    has_predictions = False
+    for predictions in st.session_state['predictions'].values():
+        if predictions:  # Check if list is not empty
+            has_predictions = True
+            break
+    
+    if not has_predictions:
+        st.sidebar.error("No predictions available to download")
+        return
+    
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         summary_data = []
@@ -268,17 +281,21 @@ def main():
         st.sidebar.header('Data Controls')
         
         if st.sidebar.button("Clear all predictions"):
+            # Clear predictions safely
             st.session_state['predictions'] = {}
+            # Also initialize empty lists for each dataset
+            for dataset_name in st.session_state.get('datasets', {}).keys():
+                st.session_state['predictions'][dataset_name] = []
             st.sidebar.success("All predictions cleared!")
+            st.rerun()
+            
         if st.sidebar.button("Clear processed files history"):
             st.session_state['processed_excel_files'] = set()
             st.sidebar.success("Processed files history cleared!")
+            st.rerun()
+            
         if st.sidebar.button("📥 Download All Predictions"):
-            if st.session_state['predictions']:
-                download_all_predictions()
-                st.sidebar.success("All predictions compiled successfully!")
-            else:
-                st.sidebar.warning("No predictions to download.")
+            download_all_predictions()
                 
         # Add horizontal line in sidebar
         st.sidebar.markdown('---')
@@ -286,6 +303,8 @@ def main():
         st.sidebar.header('System Controls')
         if st.sidebar.button("🔄 Refresh System"):
             list_csvs_from_manifest.clear()
+            st.sidebar.success("System refreshed!")
+            st.rerun()
 
         # Add horizontal line in sidebar
         st.sidebar.markdown('---')
@@ -319,6 +338,7 @@ def main():
                         if selected_file not in st.session_state['predictions']:
                             st.session_state['predictions'][selected_file] = []
                         st.success(f"✅ Loaded from GitHub: {selected_file}")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error loading CSV: {e}")
             else:
@@ -528,6 +548,11 @@ def main():
             result["Escalation & Inflation"] = escalation_cost
             grand_total = round(pred + owners_cost + contingency_cost + escalation_cost, 2)
             result["Grand Total"] = grand_total
+            
+            # Initialize predictions list if it doesn't exist
+            if selected_dataset_name not in st.session_state['predictions']:
+                st.session_state['predictions'][selected_dataset_name] = []
+                
             st.session_state['predictions'][selected_dataset_name].append(result)
             display_text = f"### **✅Cost Summary of project {project_name}**\n\n**{target_column}:** {format_currency(pred, currency)}\n\n"
             has_breakdown = any(data['percentage'] > 0 for data in epcic_breakdown.values()) or \
@@ -547,6 +572,7 @@ def main():
                     display_text += f"**Escalation & Inflation ({escalation_percentage:.3f}%):** {format_currency(escalation_cost, currency)}\n\n"
             display_text += f"**Grand Total:** {format_currency(grand_total, currency)}"
             st.success(display_text)
+            st.rerun()
 
         st.write("Or upload an Excel file:")
         excel_file = st.file_uploader("Upload Excel file", type=["xlsx"])
@@ -595,17 +621,23 @@ def main():
                             grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
                             entry["Grand Total"] = grand_total
                             
+                            # Initialize predictions list if it doesn't exist
+                            if selected_dataset_name not in st.session_state['predictions']:
+                                st.session_state['predictions'][selected_dataset_name] = []
+                                
                             st.session_state['predictions'][selected_dataset_name].append(entry)
                         
                         st.session_state['processed_excel_files'].add(file_id)
                         st.success("Batch prediction successful!")
+                        st.rerun()
                     else:
                         st.error(f"Excel missing required columns. Needed: {list(X.columns)}")
                 else:
                     st.error("Excel file must have at least 2 columns (project name + features)")
 
         with st.expander('Simplified Project List', expanded=True):
-            preds = st.session_state['predictions'][selected_dataset_name]
+            # Get predictions safely using .get() with default empty list
+            preds = st.session_state['predictions'].get(selected_dataset_name, [])
             if preds:
                 if st.button('Delete All', key='delete_all'):
                     st.session_state['predictions'][selected_dataset_name] = []
@@ -623,7 +655,9 @@ def main():
                 st.write("No predictions yet.")
 
         st.header(f"Prediction Summary based on {clean_name}")
-        if preds := st.session_state['predictions'][selected_dataset_name]:
+        # Get predictions safely using .get() with default empty list
+        preds = st.session_state['predictions'].get(selected_dataset_name, [])
+        if preds:
             df_preds = pd.DataFrame(preds)
             num_cols = df_preds.select_dtypes(include=[np.number]).columns
             df_preds_display = df_preds.copy()
