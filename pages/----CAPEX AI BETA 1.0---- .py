@@ -971,39 +971,79 @@ def main():
         with col_t3:
             st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
-        st.markdown("#### Component Cost Composition")
-        df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
-        df_cost = df_cost.rename(columns={
-            "Base CAPEX": "CAPEX", 
-            "Owner's Cost": "Owner",
-            "Cost Contingency": "Contingency",
-            "Escalation & Inflation": "Escalation",
-            "Pre-Development Cost": "Pre-Development"
-        })
-        df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-        fig_stack = plt.figure(figsize=(10, 6))
-        ax = fig_stack.add_subplot(111)
-        
-        # Create stacked bar chart
-        categories = df_cost["Component"].unique()
-        bottom = np.zeros(len(categories))
-        
-        for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
-            values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
-            ax.bar(categories, values, bottom=bottom, label=cost_type)
-            bottom += values
-        
-        ax.set_ylabel(f"Cost ({curr})")
-        ax.set_xlabel("Component")
-        ax.set_title("Cost Composition by Component")
-        ax.legend()
-        ax.tick_params(axis='x', rotation=45)
-        
-        # Format y-axis with human readable format
-        ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-        
-        plt.tight_layout()
-        st.pyplot(fig_stack)
+        with st.expander("📊 Component Cost Composition", expanded=True):
+            st.markdown("#### Component Cost Composition")
+            
+            # Optionally add a description
+            st.caption("Breakdown of cost components including CAPEX, Owner's Cost, Contingency, Escalation, and Pre-Development")
+            
+            df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
+            df_cost = df_cost.rename(columns={
+                "Base CAPEX": "CAPEX", 
+                "Owner's Cost": "Owner",
+                "Cost Contingency": "Contingency",
+                "Escalation & Inflation": "Escalation",
+                "Pre-Development Cost": "Pre-Development"
+            })
+            
+            # Add a small data table view option
+            if st.checkbox("Show Cost Composition Table", value=False, key=f"show_table_{proj_sel}"):
+                st.dataframe(df_cost, use_container_width=True)
+            
+            df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
+            fig_stack = plt.figure(figsize=(10, 6))
+            ax = fig_stack.add_subplot(111)
+            
+            # Create stacked bar chart
+            categories = df_cost["Component"].unique()
+            bottom = np.zeros(len(categories))
+            
+            for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
+                values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
+                ax.bar(categories, values, bottom=bottom, label=cost_type)
+                bottom += values
+            
+            ax.set_ylabel(f"Cost ({curr})")
+            ax.set_xlabel("Component")
+            ax.set_title("Cost Composition by Component")
+            ax.legend()
+            ax.tick_params(axis='x', rotation=45)
+            
+            # Format y-axis with human readable format
+            ax.yaxis.set_major_formatter(FuncFormatter(human_format))
+            
+            plt.tight_layout()
+            st.pyplot(fig_stack)
+            
+            # Add download button for the chart
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                if st.button("📥 Save Chart as PNG", key=f"save_chart_{proj_sel}"):
+                    fig_stack.savefig(f"{proj_sel}_cost_composition.png", dpi=300, bbox_inches='tight')
+                    st.success(f"Chart saved as {proj_sel}_cost_composition.png")
+            
+            # Optional: Add a pie chart alternative
+            if st.checkbox("Show Pie Chart Alternative", value=False, key=f"show_pie_{proj_sel}"):
+                fig_pie, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+                
+                # Overall cost breakdown pie
+                total_by_type = df_melt.groupby("Cost Type")["Value"].sum()
+                ax1.pie(total_by_type.values, labels=total_by_type.index, autopct='%1.1f%%')
+                ax1.set_title("Overall Cost Breakdown")
+                
+                # Component distribution
+                for component in df_cost["Component"].unique():
+                    comp_data = df_cost[df_cost["Component"] == component]
+                    comp_total = comp_data.iloc[:, 1:].sum().sum()
+                    ax2.bar(component, comp_total, label=component)
+                ax2.set_ylabel(f"Total Cost ({curr})")
+                ax2.set_xlabel("Component")
+                ax2.set_title("Total Cost by Component")
+                ax2.tick_params(axis='x', rotation=45)
+                ax2.yaxis.set_major_formatter(FuncFormatter(human_format))
+                
+                plt.tight_layout()
+                st.pyplot(fig_pie)
 
         st.markdown("#### Components")
         for idx, c in enumerate(comps):
@@ -1060,4 +1100,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
