@@ -363,13 +363,23 @@ def main():
         # Add horizontal line in sidebar
         st.sidebar.markdown('---')
         
-        if st.sidebar.checkbox("🧹 Cleanup Current Session", value=False,
-                               help="Enable this if you want to remove datasets not uploaded in this session."):
+        if st.sidebar.button("🧹 Cleanup Session", 
+                             help="Remove datasets not uploaded in this session (keep only current uploads)"):
             uploaded_names = {f.name for f in uploaded_files}
+            removed_count = 0
+    
             for name in list(st.session_state['datasets'].keys()):
                 if name not in uploaded_names:
                     del st.session_state['datasets'][name]
                     st.session_state['predictions'].pop(name, None)
+                    removed_count += 1
+    
+            if removed_count > 0:
+                st.sidebar.success(f"✅ Removed {removed_count} old dataset(s)")
+            else:
+                st.sidebar.info("📝 No old datasets to remove")
+    
+            st.rerun()
                     
         if not st.session_state['datasets']:
             st.write("Please upload one or more CSV files to begin.")
@@ -1045,6 +1055,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
