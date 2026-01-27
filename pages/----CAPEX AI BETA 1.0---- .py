@@ -164,19 +164,19 @@ def download_all_predictions():
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-def cost_breakdown(base_pred, eprr, sst_pct, owners_pct, cont_pct, esc_pct):
+def cost_breakdown(base_pred, epcic, predev_pct, owners_pct, cont_pct, esc_pct):
     base_pred = float(base_pred)
     
     owners_cost = round(base_pred * (owners_pct / 100.0), 2)
-    sst_cost = round(base_pred * (sst_pct / 100.0), 2)
+    predev_cost = round(base_pred * (predev_pct / 100.0), 2)
     
     contingency_cost = round((base_pred + owners_cost) * (cont_pct / 100.0), 2)
     escalation_cost = round((base_pred + owners_cost) * (esc_pct / 100.0), 2)
     
-    eprr_costs = {k: round(base_pred * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
+    epcic_costs = {k: round(base_pred * (float(v) / 100.0), 2) for k, v in (epcic or {}).items()}
     
-    grand_total = round(base_pred + owners_cost + sst_cost + contingency_cost + escalation_cost, 2)
-    return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
+    grand_total = round(base_pred + owners_cost + predev_cost + contingency_cost + escalation_cost, 2)
+    return owners_cost, predev_cost, contingency_cost, escalation_cost, epcic_costs, grand_total
 
 def project_components_df(proj):
     comps = proj.get("components", [])
@@ -190,7 +190,7 @@ def project_components_df(proj):
                 "Owner's Cost": float(c["breakdown"]["owners_cost"]),
                 "Contingency": float(c["breakdown"]["contingency_cost"]),
                 "Escalation": float(c["breakdown"]["escalation_cost"]),
-                "SST": float(c["breakdown"]["sst_cost"]),
+                "Pre-Development": float(c["breakdown"]["predev_cost"]),
                 "Grand Total": float(c["breakdown"]["grand_total"]),
             }
         )
@@ -199,13 +199,13 @@ def project_components_df(proj):
 def project_totals(proj):
     dfc = project_components_df(proj)
     if dfc.empty:
-        return {"capex_sum": 0.0, "owners": 0.0, "cont": 0.0, "esc": 0.0, "sst": 0.0, "grand_total": 0.0}
+        return {"capex_sum": 0.0, "owners": 0.0, "cont": 0.0, "esc": 0.0, "predev": 0.0, "grand_total": 0.0}
     return {
         "capex_sum": float(dfc["Base CAPEX"].sum()),
         "owners": float(dfc["Owner's Cost"].sum()),
         "cont": float(dfc["Contingency"].sum()),
         "esc": float(dfc["Escalation"].sum()),
-        "sst": float(dfc["SST"].sum()),
+        "predev": float(dfc["Pre-Development"].sum()),
         "grand_total": float(dfc["Grand Total"].sum()),
     }
 
@@ -240,7 +240,7 @@ def create_project_excel_report_capex(project_name, proj, currency=""):
         "Owner's Cost": totals["owners"],
         "Contingency": totals["cont"],
         "Escalation": totals["esc"],
-        "SST": totals["sst"],
+        "Pre-Development": totals["predev"],
         "Grand Total": totals["grand_total"],
     }
     
@@ -271,7 +271,7 @@ def main():
     if 'widget_nonce' not in st.session_state:
         st.session_state.widget_nonce = 0
     
-    # Create tabs - REMOVED COMPARE PROJECTS TAB
+    # Create tabs
     tab_data, tab_pb = st.tabs(["📊 Data", "🏗️ Project Builder"])
     
     # =======================================================================================
@@ -475,7 +475,7 @@ def main():
         # Minimized/collapsible Cost Breakdown Configuration
         with st.expander('Cost Breakdown Configuration', expanded=False):
             st.header('Cost Breakdown Configuration')
-            st.subheader("🔧 Cost Breakdown Percentage Input")
+            st.subheader("🔧 EPCIC Cost Breakdown Percentage Input")
             st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
             epcic_percentages = {}
             col_ep1, col_ep2, col_ep3, col_ep4, col_ep5 = st.columns(5)
@@ -488,7 +488,7 @@ def main():
             if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
                 st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
             st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
-            st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
+            st.subheader("💼 Pre-Development and Owner's Cost Percentage Input")
             st.markdown("")
             col_pd1, col_pd2 = st.columns(2)
             predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", min_value=0.0, max_value=100.0, value=0.0, key="predev")
@@ -543,7 +543,7 @@ def main():
             escalation_base = pred + owners_cost
             escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
             result["Escalation & Inflation"] = escalation_cost
-            grand_total = round(pred + owners_cost + contingency_cost + escalation_cost, 2)
+            grand_total = round(pred + owners_cost + contingency_cost + escalation_cost + predev_cost, 2)
             result["Grand Total"] = grand_total
             
             # Initialize predictions list if it doesn't exist
@@ -615,7 +615,7 @@ def main():
                             escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
                             entry["Escalation & Inflation"] = escalation_cost
                             
-                            grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
+                            grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost + predev_cost, 2)
                             entry["Grand Total"] = grand_total
                             
                             # Initialize predictions list if it doesn't exist
@@ -741,72 +741,65 @@ def main():
 
         st.markdown("---")
         
-        # COST BREAKDOWN CONFIGURATION - EXACTLY like Data tab
+        # COST BREAKDOWN CONFIGURATION - Consistent with Data tab
         with st.expander('Cost Breakdown Configuration', expanded=False):
             st.header('Cost Breakdown Configuration')
             
-            # WBS Level 1 Section - EXACTLY like Data tab
-            st.subheader("🔧 Cost Breakdown Percentage Input")
+            # EPCIC Section
+            st.subheader("🔧 EPCIC Cost Breakdown Percentage Input")
             st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
             
-            # Use 5 columns layout EXACTLY like Data tab
+            # Use 5 columns layout
             wb1, wb2, wb3, wb4, wb5 = st.columns(5)
             
-            # Engineering input - EXACT SAME FORMAT as Data tab
-            epcic_percentages = {}
-            epcic_percentages["Engineering"] = wb1.number_input("Engineering (%)", 
+            epcic_percentages_pb = {}
+            epcic_percentages_pb["Engineering"] = wb1.number_input("Engineering (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=10.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_eng_{proj_sel}")
             
-            # Procurement input - EXACT SAME FORMAT as Data tab
-            epcic_percentages["Procurement"] = wb2.number_input("Procurement (%)", 
+            epcic_percentages_pb["Procurement"] = wb2.number_input("Procurement (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=30.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_proc_{proj_sel}")
             
-            # Fabrication/Construction input - EXACT SAME FORMAT as Data tab
-            epcic_percentages["Construction"] = wb3.number_input("Construction (%)", 
+            epcic_percentages_pb["Construction"] = wb3.number_input("Construction (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=25.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_const_{proj_sel}")
             
-            # Installation input - EXACT SAME FORMAT as Data tab
-            epcic_percentages["Installation"] = wb4.number_input("Installation (%)", 
+            epcic_percentages_pb["Installation"] = wb4.number_input("Installation (%)", 
                                                                 min_value=0.0, 
                                                                 max_value=100.0, 
                                                                 value=20.0, 
                                                                 step=1.0, 
                                                                 key=f"pb_inst_{proj_sel}")
             
-            # Commissioning input - EXACT SAME FORMAT as Data tab
-            epcic_percentages["Commissioning"] = wb5.number_input("Commissioning (%)", 
+            epcic_percentages_pb["Commissioning"] = wb5.number_input("Commissioning (%)", 
                                                                  min_value=0.0, 
                                                                  max_value=100.0, 
                                                                  value=15.0, 
                                                                  step=1.0, 
                                                                  key=f"pb_comm_{proj_sel}")
             
-            # Calculate and display total - EXACT SAME FORMAT as Data tab
-            epcic_total = sum(epcic_percentages.values())
-            if abs(epcic_total - 100.0) > 1e-3 and epcic_total > 0:
-                st.warning(f"⚠️ EPCIC total is {epcic_total:.2f}%. Please ensure it sums to 100% if applicable.")
+            epcic_total_pb = sum(epcic_percentages_pb.values())
+            if abs(epcic_total_pb - 100.0) > 1e-3 and epcic_total_pb > 0:
+                st.warning(f"⚠️ EPCIC total is {epcic_total_pb:.2f}%. Please ensure it sums to 100% if applicable.")
             
             st.markdown("**Refer to Escalation and Inflation FY2025-FY2029 document for percentage breakdown by facilities and project types.*")
             
-            # Pre-Dev and Owner's Cost - EXACT SAME FORMAT as Data tab
-            st.subheader("💼 Pre-Dev and Owner's Cost Percentage Input")
+            # Pre-Development and Owner's Cost
+            st.subheader("💼 Pre-Development and Owner's Cost Percentage Input")
             st.markdown("")
             col_pd1, col_pd2 = st.columns(2)
             
-            # Note: In Data tab it's "Pre-Development", matching that here
-            predev_percentage = col_pd1.number_input("Enter Pre-Development (%)", 
+            predev_percentage_pb = col_pd1.number_input("Enter Pre-Development (%)", 
                                                      min_value=0.0, 
                                                      max_value=100.0, 
                                                      value=0.0, 
@@ -819,7 +812,7 @@ def main():
                                              step=0.5, 
                                              key=f"pb_owners_{proj_sel}")
             
-            # Contingency and Escalation - EXACT SAME FORMAT as Data tab
+            # Contingency and Escalation
             col_cont1, col_cont2 = st.columns(2)
             with col_cont1:
                 st.subheader("⚠️ Cost Contingency Input")
@@ -842,24 +835,14 @@ def main():
             
             st.markdown("**High-Level Escalation and Inflation rate is based on compounded percentage for the entire project development.*")
         
-        # IMPORTANT: Update the eprr_pb dictionary to match the new structure
-        # This maps the Cost Breakdown names to your original eprr_pb structure
-        eprr_pb = {
-            "Engineering": epcic_percentages.get("Engineering", 0.0),
-            "Procurement": epcic_percentages.get("Procurement", 0.0),
-            "Fabrication/Construction": epcic_percentages.get("Construction", 0.0),
-            "Transportation & Installation": epcic_percentages.get("Installation", 0.0),
-            "Commissioning": epcic_percentages.get("Commissioning", 0.0)
-        }
-        
-        # For SST, use predev_percentage (since Data tab calls it Pre-Development)
-        sst_pb = predev_percentage
+        # Create EPCIC dictionary for cost breakdown function
+        epcic_pb = epcic_percentages_pb
 
         if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
             try:
                 base_pred = single_prediction(rf_model_comp, scaler_comp, list(X_comp.columns), comp_payload)
-                owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
-                    base_pred, eprr_pb, sst_pb, owners_pb, cont_pb, esc_pb
+                owners_cost, predev_cost, contingency_cost, escalation_cost, epcic_costs, grand_total = cost_breakdown(
+                    base_pred, epcic_pb, predev_percentage_pb, owners_pb, cont_pb, esc_pb
                 )
 
                 comp_entry = {
@@ -870,15 +853,15 @@ def main():
                     "feature_cols": list(X_comp.columns),
                     "prediction": base_pred,
                     "breakdown": {
-                        "eprr_costs": eprr_costs,
-                        "eprr_pct": eprr_pb,
-                        "sst_cost": sst_cost,
+                        "epcic_costs": epcic_costs,
+                        "epcic_pct": epcic_pb,
+                        "predev_cost": predev_cost,
                         "owners_cost": owners_cost,
                         "contingency_cost": contingency_cost,
                         "escalation_cost": escalation_cost,
                         "grand_total": grand_total,
                         "target_col": target_column_comp,
-                        "sst_pct": float(sst_pb),
+                        "predev_pct": float(predev_percentage_pb),
                         "owners_pct": float(owners_pb),
                         "cont_pct": float(cont_pb),
                         "esc_pct": float(esc_pb),
@@ -914,13 +897,13 @@ def main():
                 "Base CAPEX": float(c["prediction"])
             }
             
-            # Add EPRR breakdown costs
-            eprr_costs = c["breakdown"].get("eprr_costs", {})
-            for phase, cost in eprr_costs.items():
+            # Add EPCIC breakdown costs
+            epcic_costs = c["breakdown"].get("epcic_costs", {})
+            for phase, cost in epcic_costs.items():
                 row[f"{phase} Cost"] = float(cost)
             
             # Add other cost breakdowns
-            row["Pre-Development Cost"] = float(c["breakdown"].get("sst_cost", 0.0))
+            row["Pre-Development Cost"] = float(c["breakdown"].get("predev_cost", 0.0))
             row["Owner's Cost"] = float(c["breakdown"].get("owners_cost", 0.0))
             row["Cost Contingency"] = float(c["breakdown"].get("contingency_cost", 0.0))
             row["Escalation & Inflation"] = float(c["breakdown"].get("escalation_cost", 0.0))
@@ -963,9 +946,9 @@ def main():
         with col_t1:
             st.metric("Project CAPEX (Base)", f"{curr} {t['capex_sum']:,.2f}")
         with col_t2:
-            st.metric("Project SST", f"{curr} {t['sst']:,.2f}")
+            st.metric("Project Pre-Development", f"{curr} {t['predev']:,.2f}")
         with col_t3:
-            st.metric("Project Grand Total (incl. SST)", f"{curr} {t['grand_total']:,.2f}")
+            st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
         st.markdown("#### Component Cost Composition")
         df_cost = dfc[["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", "Escalation & Inflation", "Pre-Development Cost"]].copy()
@@ -974,9 +957,8 @@ def main():
             "Owner's Cost": "Owner",
             "Cost Contingency": "Contingency",
             "Escalation & Inflation": "Escalation",
-            "Pre-Development Cost": "SST"
+            "Pre-Development Cost": "Pre-Development"
         })
-        df_cost = df_cost.rename(columns={"Base CAPEX": "CAPEX", "Owner's Cost": "Owner"})
         df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
         fig_stack = plt.figure(figsize=(10, 6))
         ax = fig_stack.add_subplot(111)
@@ -985,7 +967,7 @@ def main():
         categories = df_cost["Component"].unique()
         bottom = np.zeros(len(categories))
         
-        for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "SST"]:
+        for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
             values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
             ax.bar(categories, values, bottom=bottom, label=cost_type)
             bottom += values
@@ -1057,14 +1039,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
-
-
