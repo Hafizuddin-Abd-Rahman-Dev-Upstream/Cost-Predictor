@@ -508,28 +508,27 @@ def main():
         project_name = st.text_input('Enter Project Name')
         num_features = len(X.columns)
 
+        st.header('Make New Predictions')
+        project_name = st.text_input('Enter Project Name')
+        
+        # NEW: Table form like Component Feature Inputs
         st.markdown("**Feature Inputs**")
         st.markdown("Provide feature values (1 row). Leave blank for NaN.")
-
+        
         # Create a dataframe with one row for editing
         input_key = f"input_row__{selected_dataset_name}"
         if input_key not in st.session_state:
             st.session_state[input_key] = {col: np.nan for col in X.columns}
-
+        
         input_row_df = pd.DataFrame([st.session_state[input_key]], columns=X.columns)
         edited_df = st.data_editor(input_row_df, num_rows="fixed", use_container_width=True, key=f"pred_editor_{selected_dataset_name}")
         new_data = edited_df.iloc[0].to_dict()
-            
-            if user_val.strip().lower() == "nan" or user_val.strip() == "":
-                new_data[col] = np.nan
-            else:
-                try:
-                    new_data[col] = float(user_val)
-                except ValueError:
-                    new_data[col] = np.nan
 
         if st.button('Predict'):
             df_input = pd.DataFrame([new_data])
+            input_scaled = scaler.transform(df_input)
+            pred = rf_model.predict(input_scaled)[0]
+            
             input_scaled = scaler.transform(df_input)
             pred = rf_model.predict(input_scaled)[0]
             result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
@@ -1030,6 +1029,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
