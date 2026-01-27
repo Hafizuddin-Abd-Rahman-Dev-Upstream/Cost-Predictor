@@ -253,7 +253,7 @@ st.markdown(f"""
         # <img class="logo-float" src="{logo_url}" width="290" style="filter: drop-shadow(0 10px 18px rgba(0,58,93,0.18));">
     # </div>
     # """,
-    unsafe_allow_html=True
+    # unsafe_allow_html=True
 )
 
 # Catchphrase (modern)
