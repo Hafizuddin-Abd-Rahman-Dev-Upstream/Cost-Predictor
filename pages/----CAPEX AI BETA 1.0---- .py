@@ -743,25 +743,119 @@ def main():
         comp_payload = comp_edited.iloc[0].to_dict()
 
         st.markdown("---")
-        st.markdown("**WBS Level 1**")
-        cp1, cp2 = st.columns(2)
-        with cp1:
-            st.markdown("use +/-")
-            eng_pb = st.number_input("Engineering", 0.0, 100.0, 12.0, 1.0, key=f"pb_eng_{proj_sel}")
-            procurement_pb = st.number_input("Procurement", 0.0, 100.0, 33.0, 1.0, key=f"pb_procurement_{proj_sel}")
-            fabrication_pb = st.number_input("Fabrication/Construction", 0.0, 100.0, 33.0, 1.0, key=f"pb_fabrication_{proj_sel}")
-            ti_pb = st.number_input("Transportation & Installation (T&I)", 0.0, 100.0, 22.0, 1.0, key=f"pb_ti_{proj_sel}")
-
-            eprr_pb = {"Engineering": eng_pb, "Procurement": procurement_pb, "Fabrication/Construction": fabrication_pb, "Transportation & Installation": ti_pb}
+        
+        # WBS Level 1 - Updated to match Cost Breakdown Configuration style
+        with st.expander('📐 WBS Level 1 Configuration', expanded=True):
+            st.header('WBS Level 1 Configuration')
+            st.subheader("🔧 WBS Level 1 Percentage Input")
+            st.markdown("Enter the percentage breakdown for the following categories. You may leave the input to 0% if unapplicable.")
+            
+            # Use 5 columns layout like in Cost Breakdown Configuration
+            wb1, wb2, wb3, wb4, wb5 = st.columns(5)
+            
+            # Engineering input
+            eng_pb = wb1.number_input("Engineering (%)", 
+                                      min_value=0.0, 
+                                      max_value=100.0, 
+                                      value=10.0, 
+                                      step=1.0, 
+                                      key=f"pb_eng_{proj_sel}",
+                                      help="Percentage for Engineering")
+            
+            # Procurement input
+            procurement_pb = wb2.number_input("Procurement (%)", 
+                                              min_value=0.0, 
+                                              max_value=100.0, 
+                                              value=30.0, 
+                                              step=1.0, 
+                                              key=f"pb_procurement_{proj_sel}",
+                                              help="Percentage for Procurement")
+            
+            # Fabrication/Construction input
+            fabrication_pb = wb3.number_input("Fabrication/Construction (%)", 
+                                              min_value=0.0, 
+                                              max_value=100.0, 
+                                              value=25.0, 
+                                              step=1.0, 
+                                              key=f"pb_fabrication_{proj_sel}",
+                                              help="Percentage for Fabrication/Construction")
+            
+            # Transportation & Installation input
+            ti_pb = wb4.number_input("Transportation & Installation (T&I) (%)", 
+                                     min_value=0.0, 
+                                     max_value=100.0, 
+                                     value=20.0, 
+                                     step=1.0, 
+                                     key=f"pb_ti_{proj_sel}",
+                                     help="Percentage for Transportation & Installation")
+            
+            # Commissioning input (NEW FIELD)
+            commissioning_pb = wb5.number_input("Commissioning (%)", 
+                                                min_value=0.0, 
+                                                max_value=100.0, 
+                                                value=15.0, 
+                                                step=1.0, 
+                                                key=f"pb_commissioning_{proj_sel}",
+                                                help="Percentage for Commissioning")
+            
+            # Create eprr dictionary with all 5 fields
+            eprr_pb = {
+                "Engineering": eng_pb, 
+                "Procurement": procurement_pb, 
+                "Fabrication/Construction": fabrication_pb, 
+                "Transportation & Installation": ti_pb,
+                "Commissioning": commissioning_pb  # Added Commissioning
+            }
+            
+            # Calculate and display total like in Cost Breakdown Configuration
             eprr_total_pb = sum(eprr_pb.values())
-            st.caption(f"WBS total: **{eprr_total_pb:.2f}%**")
-
-        with cp2:
-            st.markdown("use +/-")
-            sst_pb = st.number_input("SST", 0.0, 100.0, 0.0, 0.5, key=f"pb_sst_{proj_sel}")
-            owners_pb = st.number_input("Owner's Cost", 0.0, 100.0, 0.0, 0.5, key=f"pb_owners_{proj_sel}")
-            cont_pb = st.number_input("Contingency", 0.0, 100.0, 0.0, 0.5, key=f"pb_cont_{proj_sel}")
-            esc_pb = st.number_input("Escalation & Inflation", 0.0, 100.0, 0.0, 0.5, key=f"pb_esc_{proj_sel}")
+            
+            # Warning if total doesn't sum to 100%
+            if abs(eprr_total_pb - 100.0) > 1e-3 and eprr_total_pb > 0:
+                st.warning(f"⚠️ WBS Level 1 total is {eprr_total_pb:.2f}%. Please ensure it sums to 100% if applicable.")
+            else:
+                st.success(f"✅ WBS Level 1 total: **{eprr_total_pb:.2f}%**")
+            
+            st.markdown("**For accurate WBS Level 1 breakdown, refer to project-specific engineering documents and standards.*")
+        
+        # Additional Cost Factors (kept in original 2-column format for contrast)
+        st.subheader("💼 Additional Cost Factors")
+        st.markdown("Configure additional cost percentages for this component.")
+        
+        cp2a, cp2b = st.columns(2)
+        with cp2a:
+            st.markdown("**SST & Owner's Cost**")
+            sst_pb = st.number_input("SST (%)", 
+                                     min_value=0.0, 
+                                     max_value=100.0, 
+                                     value=0.0, 
+                                     step=0.5, 
+                                     key=f"pb_sst_{proj_sel}",
+                                     help="Sales & Service Tax percentage")
+            owners_pb = st.number_input("Owner's Cost (%)", 
+                                        min_value=0.0, 
+                                        max_value=100.0, 
+                                        value=0.0, 
+                                        step=0.5, 
+                                        key=f"pb_owners_{proj_sel}",
+                                        help="Owner's additional cost percentage")
+        
+        with cp2b:
+            st.markdown("**Contingency & Escalation**")
+            cont_pb = st.number_input("Contingency (%)", 
+                                      min_value=0.0, 
+                                      max_value=100.0, 
+                                      value=0.0, 
+                                      step=0.5, 
+                                      key=f"pb_cont_{proj_sel}",
+                                      help="Cost contingency percentage")
+            esc_pb = st.number_input("Escalation & Inflation (%)", 
+                                     min_value=0.0, 
+                                     max_value=100.0, 
+                                     value=0.0, 
+                                     step=0.5, 
+                                     key=f"pb_esc_{proj_sel}",
+                                     help="Escalation and inflation percentage")
 
         if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
             try:
@@ -923,3 +1017,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
