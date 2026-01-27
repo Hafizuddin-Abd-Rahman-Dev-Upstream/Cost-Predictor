@@ -989,113 +989,6 @@ def main():
         with col_t3:
             st.metric("Project Grand Total (incl. Pre-Dev)", f"{curr} {t['grand_total']:,.2f}")
 
-        """
-        with st.expander("📊 Component Cost Composition", expanded=False):
-            st.markdown("#### Component Cost Composition")
-            
-            # Safely select columns that actually exist in the dataframe
-            required_columns = ["Component", "Base CAPEX", "Owner's Cost", "Cost Contingency", 
-                              "Escalation & Inflation", "Pre-Development Cost"]
-            
-            # Check which columns exist
-            available_columns = []
-            for col in required_columns:
-                if col in dfc.columns:
-                    available_columns.append(col)
-                else:
-                    # Try to find similar columns
-                    for dfc_col in dfc.columns:
-                        if col.lower() in dfc_col.lower():
-                            available_columns.append(dfc_col)
-                            break
-            
-            if len(available_columns) >= 2:  # Need at least Component and one cost column
-                df_cost = dfc[available_columns].copy()
-                
-                # Rename columns to standard names for consistency
-                column_mapping = {}
-                for col in df_cost.columns:
-                    col_lower = col.lower()
-                    if "component" in col_lower:
-                        column_mapping[col] = "Component"
-                    elif "capex" in col_lower or "prediction" in col_lower or target_column_comp.lower() in col_lower:
-                        column_mapping[col] = "CAPEX"
-                    elif "owner" in col_lower:
-                        column_mapping[col] = "Owner"
-                    elif "contingency" in col_lower:
-                        column_mapping[col] = "Contingency"
-                    elif "escalation" in col_lower or "inflation" in col_lower:
-                        column_mapping[col] = "Escalation"
-                    elif "development" in col_lower or "predev" in col_lower:
-                        column_mapping[col] = "Pre-Development"
-                
-                df_cost = df_cost.rename(columns=column_mapping)
-                
-                # Ensure we have the required columns for the chart
-                chart_columns = ["Component", "CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]
-                for chart_col in chart_columns:
-                    if chart_col not in df_cost.columns:
-                        df_cost[chart_col] = 0.0  # Add missing columns with zero values
-                
-                df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-                fig_stack = plt.figure(figsize=(10, 6))
-                ax = fig_stack.add_subplot(111)
-                
-                # Create stacked bar chart
-                categories = df_cost["Component"].unique()
-                bottom = np.zeros(len(categories))
-                
-                for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
-                    if cost_type in df_cost.columns:
-                        values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
-                        ax.bar(categories, values, bottom=bottom, label=cost_type)
-                        bottom += values
-                
-                ax.set_ylabel(f"Cost ({curr})")
-                ax.set_xlabel("Component")
-                ax.set_title("Cost Composition by Component")
-                ax.legend()
-                ax.tick_params(axis='x', rotation=45)
-                
-                # Format y-axis with human readable format
-                ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-                
-                plt.tight_layout()
-                st.pyplot(fig_stack)
-            else:
-                st.warning("Not enough cost data available for the composition chart.")
-            df_cost = df_cost.rename(columns={
-                "Base CAPEX": "CAPEX", 
-                "Owner's Cost": "Owner",
-                "Cost Contingency": "Contingency",
-                "Escalation & Inflation": "Escalation",
-                "Pre-Development Cost": "Pre-Development"
-            })
-            df_melt = df_cost.melt(id_vars="Component", var_name="Cost Type", value_name="Value")
-            fig_stack = plt.figure(figsize=(10, 6))
-            ax = fig_stack.add_subplot(111)
-            
-            # Create stacked bar chart
-            categories = df_cost["Component"].unique()
-            bottom = np.zeros(len(categories))
-            
-            for cost_type in ["CAPEX", "Owner", "Contingency", "Escalation", "Pre-Development"]:
-                values = [df_cost[df_cost["Component"] == cat][cost_type].values[0] for cat in categories]
-                ax.bar(categories, values, bottom=bottom, label=cost_type)
-                bottom += values
-            
-            ax.set_ylabel(f"Cost ({curr})")
-            ax.set_xlabel("Component")
-            ax.set_title("Cost Composition by Component")
-            ax.legend()
-            ax.tick_params(axis='x', rotation=45)
-            
-            # Format y-axis with human readable format
-            ax.yaxis.set_major_formatter(FuncFormatter(human_format))
-            
-            plt.tight_layout()
-            st.pyplot(fig_stack)
-        """
 
         st.markdown("#### Components")
         for idx, c in enumerate(comps):
@@ -1152,5 +1045,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
