@@ -201,49 +201,55 @@ section[data-testid="stSidebar"] button[aria-label="Collapse sidebar"] {{
 """, unsafe_allow_html=True)
 
 # ----------------------------
-# 📊 LOGGING SYSTEM
+# 📊 LOGGING SYSTEM FOR STREAMLIT CLOUD
 # ----------------------------
 
 def setup_logging():
-    """Setup logging directory and files"""
-    log_dir = "login_logs"
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir)
-    return log_dir
+    """Setup logging directory for Streamlit Cloud"""
+    # For Streamlit Cloud, use /tmp directory which is writable
+    # and persists across app restarts
+    log_dir = "/tmp/login_logs"  # Changed to /tmp for Streamlit Cloud
+    
+    try:
+        # Create directory if it doesn't exist
+        Path(log_dir).mkdir(parents=True, exist_ok=True)
+        return log_dir
+    except Exception as e:
+        # Fallback to current directory if /tmp fails
+        fallback_dir = "login_logs"
+        Path(fallback_dir).mkdir(parents=True, exist_ok=True)
+        return fallback_dir
 
 def log_login_attempt(email, status, log_dir, additional_info=""):
     """Log login attempts to daily CSV files"""
-    # Get current date for filename
-    current_date = datetime.now().strftime("%Y-%m-%d")
-    log_file = os.path.join(log_dir, f"login_log_{current_date}.csv")
-    
-    # Create log entry
-    log_entry = {
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "email": email,
-        "status": status,
-        "additional_info": additional_info,
-        "day_of_week": datetime.now().strftime("%A"),
-        "hour": datetime.now().strftime("%H:00")
-    }
-    
-    # Write to CSV
-    file_exists = os.path.isfile(log_file)
-    
     try:
+        # Get current date for filename
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        log_file = os.path.join(log_dir, f"login_log_{current_date}.csv")
+        
+        # Create log entry
+        log_entry = {
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "email": email,
+            "status": status,
+            "additional_info": additional_info,
+            "day_of_week": datetime.now().strftime("%A"),
+            "hour": datetime.now().strftime("%H:00")
+        }
+        
+        # Write to CSV
+        file_exists = os.path.isfile(log_file)
+        
         with open(log_file, 'a', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=["timestamp", "email", "status", "additional_info", "day_of_week", "hour"])
             if not file_exists:
                 writer.writeheader()
             writer.writerow(log_entry)
+        
+        return True
     except Exception as e:
-        # Fallback: create new file if there's an issue
-        with open(log_file, 'w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=["timestamp", "email", "status", "additional_info", "day_of_week", "hour"])
-            writer.writeheader()
-            writer.writerow(log_entry)
-    
-    return True
+        # Silent fail - don't break the app if logging fails
+        return False
 
 def cleanup_old_logs(log_dir, days_to_keep=30):
     """Remove log files older than specified days"""
@@ -267,6 +273,10 @@ def get_all_logs(log_dir):
     """Get all logs combined into a single DataFrame"""
     all_logs = []
     try:
+        # Check if directory exists
+        if not os.path.exists(log_dir):
+            return pd.DataFrame()
+            
         log_files = sorted([f for f in os.listdir(log_dir) if f.endswith('.csv')], reverse=True)
         
         for file in log_files:
@@ -320,8 +330,12 @@ def get_log_statistics(log_dir):
             "today_failed": 0
         }
 
-# Initialize logging
+# Initialize logging - THIS WILL CREATE THE DIRECTORY
 LOG_DIR = setup_logging()
+
+# Debug info for Streamlit Cloud (remove in production)
+st.sidebar.info(f"Log dir: {LOG_DIR}")
+st.sidebar.info(f"Log dir exists: {os.path.exists(LOG_DIR)}")
 
 # Cleanup old logs (run once per session)
 if "cleanup_done" not in st.session_state:
@@ -335,8 +349,9 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
     st.session_state.user_email = ""
 
+# Get credentials from secrets
 APPROVED_EMAILS = st.secrets.get("emails", [])
-ADMIN_EMAILS = st.secrets.get("admin_emails", ["admin@petronas.com"])  # Add to secrets
+ADMIN_EMAILS = st.secrets.get("admin_emails", ["admin@petronas.com"])
 correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
@@ -485,6 +500,9 @@ if st.session_state.user_email in ADMIN_EMAILS:
     with col4:
         st.metric("Unique Users", stats["unique_users"])
     
+    # Show current log directory info
+    st.info(f"📁 Logs stored in: `{LOG_DIR}`")
+    
     # Today's activity
     st.subheader("📅 Today's Activity")
     today_file = os.path.join(LOG_DIR, f"login_log_{datetime.now().strftime('%Y-%m-%d')}.csv")
@@ -527,7 +545,10 @@ if st.session_state.user_email in ADMIN_EMAILS:
     st.subheader("📂 Historical Logs")
     
     # List all log files
-    log_files = sorted([f for f in os.listdir(LOG_DIR) if f.endswith('.csv')], reverse=True)
+    try:
+        log_files = sorted([f for f in os.listdir(LOG_DIR) if f.endswith('.csv')], reverse=True)
+    except:
+        log_files = []
     
     if log_files:
         selected_file = st.selectbox("Select log file to view:", log_files)
@@ -598,7 +619,7 @@ if st.session_state.user_email in ADMIN_EMAILS:
     
     with col2:
         # Count log files
-        log_count = len(log_files)
+        log_count = len(log_files) if 'log_files' in locals() else 0
         st.metric("Total Log Files", log_count)
     
     st.markdown("---")
@@ -615,14 +636,14 @@ with col1:
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2);'>
             <h4>📊 Cost Predictor</h4>
-            <p>cost estimation based on project parameters and historical data.</p>
+            <p>AI-powered cost estimation based on project parameters and historical data.</p>
         </div>
         """, unsafe_allow_html=True)
         
     with st.container():
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
-            <h4>📈 Compare Projects </h4>
+            <h4>📈 Benchmark Analyzer</h4>
             <p>Compare project costs against industry benchmarks and historical data.</p>
         </div>
         """, unsafe_allow_html=True)
@@ -639,7 +660,7 @@ with col2:
     with st.container():
         st.markdown("""
         <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
-            <h4>📄 Downloads </h4>
+            <h4>📄 Report Generator</h4>
             <p>Automatically generate professional cost estimation reports.</p>
         </div>
         """, unsafe_allow_html=True)
