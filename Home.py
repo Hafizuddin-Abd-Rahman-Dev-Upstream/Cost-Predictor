@@ -1,4 +1,11 @@
 import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import os
+import csv
+import glob
+import time
+from pathlib import Path
 
 # ✅ Set page config FIRST (must be before other st.* calls)
 st.set_page_config(
@@ -169,16 +176,167 @@ section[data-testid="stSidebar"] button[aria-label="Collapse sidebar"] {{
 [data-testid="stFavoriteButton"] {{
     display: none !important;
 }}
+
+/* ===== Admin Panel Styles ===== */
+.admin-card {{
+    background: linear-gradient(135deg, rgba(0,178,169,0.08), rgba(0,58,93,0.05)) !important;
+    border: 1px solid rgba(0,178,169,0.25) !important;
+    border-radius: 16px !important;
+    padding: 1.5rem !important;
+    margin: 1rem 0 !important;
+}}
+.status-success {{
+    color: #10B981 !important;
+    font-weight: 600 !important;
+}}
+.status-failed {{
+    color: #EF4444 !important;
+    font-weight: 600 !important;
+}}
+.status-logout {{
+    color: #F59E0B !important;
+    font-weight: 600 !important;
+}}
 </style>
 """, unsafe_allow_html=True)
 
 # ----------------------------
-# 🔐 Password protection
+# 📊 LOGGING SYSTEM
+# ----------------------------
+
+def setup_logging():
+    """Setup logging directory and files"""
+    log_dir = "login_logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    return log_dir
+
+def log_login_attempt(email, status, log_dir, additional_info=""):
+    """Log login attempts to daily CSV files"""
+    # Get current date for filename
+    current_date = datetime.now().strftime("%Y-%m-%d")
+    log_file = os.path.join(log_dir, f"login_log_{current_date}.csv")
+    
+    # Create log entry
+    log_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "email": email,
+        "status": status,
+        "additional_info": additional_info,
+        "day_of_week": datetime.now().strftime("%A"),
+        "hour": datetime.now().strftime("%H:00")
+    }
+    
+    # Write to CSV
+    file_exists = os.path.isfile(log_file)
+    
+    try:
+        with open(log_file, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=["timestamp", "email", "status", "additional_info", "day_of_week", "hour"])
+            if not file_exists:
+                writer.writeheader()
+            writer.writerow(log_entry)
+    except Exception as e:
+        # Fallback: create new file if there's an issue
+        with open(log_file, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=["timestamp", "email", "status", "additional_info", "day_of_week", "hour"])
+            writer.writeheader()
+            writer.writerow(log_entry)
+    
+    return True
+
+def cleanup_old_logs(log_dir, days_to_keep=30):
+    """Remove log files older than specified days"""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+        
+        for log_file in glob.glob(os.path.join(log_dir, "login_log_*.csv")):
+            try:
+                filename = os.path.basename(log_file)
+                date_str = filename.replace("login_log_", "").replace(".csv", "")
+                file_date = datetime.strptime(date_str, "%Y-%m-%d")
+                
+                if file_date < cutoff_date:
+                    os.remove(log_file)
+            except:
+                continue
+    except:
+        pass
+
+def get_all_logs(log_dir):
+    """Get all logs combined into a single DataFrame"""
+    all_logs = []
+    try:
+        log_files = sorted([f for f in os.listdir(log_dir) if f.endswith('.csv')], reverse=True)
+        
+        for file in log_files:
+            try:
+                file_path = os.path.join(log_dir, file)
+                df = pd.read_csv(file_path)
+                df['log_date'] = file.replace('login_log_', '').replace('.csv', '')
+                all_logs.append(df)
+            except:
+                continue
+        
+        if all_logs:
+            return pd.concat(all_logs, ignore_index=True)
+    except:
+        pass
+    return pd.DataFrame()
+
+def get_log_statistics(log_dir):
+    """Get statistics from logs"""
+    try:
+        df = get_all_logs(log_dir)
+        if df.empty:
+            return {
+                "total_logins": 0,
+                "successful": 0,
+                "failed": 0,
+                "unique_users": 0,
+                "today_logins": 0
+            }
+        
+        today = datetime.now().strftime("%Y-%m-%d")
+        today_logs = df[df['log_date'] == today] if 'log_date' in df.columns else pd.DataFrame()
+        
+        return {
+            "total_logins": len(df),
+            "successful": len(df[df['status'] == 'SUCCESS']),
+            "failed": len(df[df['status'] == 'FAILED']),
+            "unique_users": df['email'].nunique(),
+            "today_logins": len(today_logs),
+            "today_success": len(today_logs[today_logs['status'] == 'SUCCESS']) if not today_logs.empty else 0,
+            "today_failed": len(today_logs[today_logs['status'] == 'FAILED']) if not today_logs.empty else 0
+        }
+    except:
+        return {
+            "total_logins": 0,
+            "successful": 0,
+            "failed": 0,
+            "unique_users": 0,
+            "today_logins": 0,
+            "today_success": 0,
+            "today_failed": 0
+        }
+
+# Initialize logging
+LOG_DIR = setup_logging()
+
+# Cleanup old logs (run once per session)
+if "cleanup_done" not in st.session_state:
+    cleanup_old_logs(LOG_DIR, days_to_keep=30)
+    st.session_state.cleanup_done = True
+
+# ----------------------------
+# 🔐 Password protection with LOGGING
 # ----------------------------
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
+    st.session_state.user_email = ""
 
 APPROVED_EMAILS = st.secrets.get("emails", [])
+ADMIN_EMAILS = st.secrets.get("admin_emails", ["admin@petronas.com"])  # Add to secrets
 correct_password = st.secrets.get("password", None)
 
 if not st.session_state.authenticated:
@@ -193,9 +351,17 @@ if not st.session_state.authenticated:
         if submitted:
             if email in APPROVED_EMAILS and password == correct_password:
                 st.session_state.authenticated = True
+                st.session_state.user_email = email
+                
+                # Log successful login
+                log_login_attempt(email, "SUCCESS", LOG_DIR, "User logged in successfully")
+                
                 st.success("✅ Access granted.")
+                time.sleep(0.5)
                 st.rerun()
             else:
+                # Log failed attempt
+                log_login_attempt(email if email else "Unknown", "FAILED", LOG_DIR, "Invalid credentials")
                 st.error("❌ Invalid email or password. Please contact Cost Engineering Focal for access")
 
     st.stop()
@@ -206,7 +372,10 @@ if not st.session_state.authenticated:
 col1, col2, col3 = st.columns([7, 2, 2])
 with col2:
     if st.button("🔓 Logout"):
+        # Log logout action
+        log_login_attempt(st.session_state.user_email, "LOGOUT", LOG_DIR, "User logged out")
         st.session_state.authenticated = False
+        st.session_state.user_email = ""
         st.rerun()
 
 # ----------------------------
@@ -243,18 +412,22 @@ st.markdown(f"""
 <div class="shimmer-line"></div>
 """, unsafe_allow_html=True)
 
-# ----------------------------
-# Logo (float animation)
-# ----------------------------
-# logo_url = "https://raw.githubusercontent.com/apizrahman24/Cost-Predictor/main/logo.png"
-# st.markdown(
-    # f"""
-    # <div style="display:flex; justify-content:center; align-items:center; margin: 0.6rem 0 0.4rem 0;">
-        # <img class="logo-float" src="{logo_url}" width="290" style="filter: drop-shadow(0 10px 18px rgba(0,58,93,0.18));">
-    # </div>
-    # """,
-    # unsafe_allow_html=True
-# )
+# Welcome message with user email
+st.markdown(f"""
+<div style="text-align:center; margin-bottom: 1.5rem;">
+  <div style="
+      display: inline-block;
+      padding: 0.5rem 1rem;
+      background: rgba(0,178,169,0.08);
+      border-radius: 12px;
+      border: 1px solid rgba(0,178,169,0.2);
+      font-size: 0.95rem;
+      color: {PETRONAS_NAVY};
+  ">
+    👋 Welcome, <b>{st.session_state.user_email}</b>
+  </div>
+</div>
+""", unsafe_allow_html=True)
 
 # Catchphrase (modern)
 st.markdown(f"""
@@ -265,7 +438,7 @@ st.markdown(f"""
       color: {PETRONAS_NAVY};
       margin-bottom: 0.55rem;
   ">
-    “Smart Cost Estimation Made Simple”
+    "Smart Cost Estimation Made Simple"
   </div>
 
   <div style="
@@ -283,10 +456,200 @@ st.markdown(f"""
 # Divider
 st.markdown("---")
 
+# ----------------------------
+# 📊 ADMIN PANEL SECTION (Only for admin users)
+# ----------------------------
+if st.session_state.user_email in ADMIN_EMAILS:
+    st.markdown(f"""
+    <div style="text-align:center;">
+        <h2 style="color:{PETRONAS_NAVY}; margin-bottom: 0.5rem;">📊 Admin Dashboard</h2>
+        <div style="color:rgba(0,0,0,0.6); font-size:0.95rem; margin-bottom: 1.5rem;">
+            Login Activity Monitoring & Analytics
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Get statistics
+    stats = get_log_statistics(LOG_DIR)
+    
+    # Display statistics in columns
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Logins", stats["total_logins"])
+    with col2:
+        st.metric("Successful", stats["successful"], 
+                 f"Today: {stats['today_success']}")
+    with col3:
+        st.metric("Failed", stats["failed"],
+                 f"Today: {stats['today_failed']}")
+    with col4:
+        st.metric("Unique Users", stats["unique_users"])
+    
+    # Today's activity
+    st.subheader("📅 Today's Activity")
+    today_file = os.path.join(LOG_DIR, f"login_log_{datetime.now().strftime('%Y-%m-%d')}.csv")
+    
+    if os.path.exists(today_file):
+        today_df = pd.read_csv(today_file)
+        
+        # Format status with colors
+        def format_status(status):
+            if status == "SUCCESS":
+                return f'<span class="status-success">✅ {status}</span>'
+            elif status == "FAILED":
+                return f'<span class="status-failed">❌ {status}</span>'
+            elif status == "LOGOUT":
+                return f'<span class="status-logout">🔓 {status}</span>'
+            return status
+        
+        # Create formatted dataframe for display
+        display_df = today_df.copy()
+        display_df['status'] = display_df['status'].apply(format_status)
+        
+        # Show table
+        st.markdown('<div class="admin-card">', unsafe_allow_html=True)
+        st.markdown(f"**Today's Logins:** {len(today_df)} records")
+        st.write(display_df[['timestamp', 'email', 'status', 'additional_info']].to_html(escape=False, index=False), unsafe_allow_html=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        # Download button for today's logs
+        csv_data = today_df.to_csv(index=False)
+        st.download_button(
+            label="📥 Download Today's Logs",
+            data=csv_data,
+            file_name=f"login_logs_{datetime.now().strftime('%Y-%m-%d')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.info("No login activity recorded today.")
+    
+    # Historical Logs Section
+    st.subheader("📂 Historical Logs")
+    
+    # List all log files
+    log_files = sorted([f for f in os.listdir(LOG_DIR) if f.endswith('.csv')], reverse=True)
+    
+    if log_files:
+        selected_file = st.selectbox("Select log file to view:", log_files)
+        
+        if selected_file:
+            file_path = os.path.join(LOG_DIR, selected_file)
+            df = pd.read_csv(file_path)
+            
+            # Show file statistics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Total Records", len(df))
+            with col2:
+                success_count = len(df[df['status'] == 'SUCCESS'])
+                st.metric("Successful", success_count)
+            with col3:
+                failed_count = len(df[df['status'] == 'FAILED'])
+                st.metric("Failed", failed_count)
+            
+            # Show data
+            st.markdown('<div class="admin-card">', unsafe_allow_html=True)
+            st.dataframe(df, use_container_width=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Download button for selected file
+            csv_data = df.to_csv(index=False)
+            st.download_button(
+                label=f"📥 Download {selected_file}",
+                data=csv_data,
+                file_name=selected_file,
+                mime="text/csv"
+            )
+            
+        # Combined Analysis
+        st.subheader("📈 Combined Analysis")
+        
+        if st.button("Generate Monthly Report"):
+            all_logs_df = get_all_logs(LOG_DIR)
+            
+            if not all_logs_df.empty:
+                # Create monthly summary
+                all_logs_df['timestamp'] = pd.to_datetime(all_logs_df['timestamp'])
+                all_logs_df['month'] = all_logs_df['timestamp'].dt.strftime('%Y-%m')
+                
+                monthly_summary = all_logs_df.groupby(['month', 'status']).size().unstack(fill_value=0)
+                
+                # Display chart
+                st.bar_chart(monthly_summary)
+                
+                # Show top users
+                st.markdown("**Top 10 Users by Login Activity:**")
+                top_users = all_logs_df['email'].value_counts().head(10)
+                st.dataframe(top_users.reset_index().rename(columns={'index': 'Email', 'email': 'Login Count'}))
+            else:
+                st.warning("No data available for analysis.")
+    else:
+        st.info("No log files found.")
+    
+    # Log cleanup section (for admins only)
+    st.subheader("🛠️ Log Management")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Run Log Cleanup Now"):
+            cleanup_old_logs(LOG_DIR, days_to_keep=30)
+            st.success("Log cleanup completed! Files older than 30 days have been removed.")
+            st.rerun()
+    
+    with col2:
+        # Count log files
+        log_count = len(log_files)
+        st.metric("Total Log Files", log_count)
+    
+    st.markdown("---")
+
+# Main content divider
+st.markdown("### 🛠️ Available Tools")
+st.markdown("Select from the following cost engineering tools:")
+
+# Tool cards (you can expand this section)
+col1, col2 = st.columns(2)
+
+with col1:
+    with st.container():
+        st.markdown("""
+        <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2);'>
+            <h4>📊 Cost Predictor</h4>
+            <p>AI-powered cost estimation based on project parameters and historical data.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with st.container():
+        st.markdown("""
+        <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
+            <h4>📈 Benchmark Analyzer</h4>
+            <p>Compare project costs against industry benchmarks and historical data.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+with col2:
+    with st.container():
+        st.markdown("""
+        <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2);'>
+            <h4>⚡ Risk Calculator</h4>
+            <p>Calculate and visualize project risks with Monte Carlo simulations.</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+    with st.container():
+        st.markdown("""
+        <div style='padding: 1.5rem; background: rgba(0,178,169,0.08); border-radius: 12px; border: 1px solid rgba(0,178,169,0.2); margin-top: 1rem;'>
+            <h4>📄 Report Generator</h4>
+            <p>Automatically generate professional cost estimation reports.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
 # Footer
+st.markdown("---")
 st.markdown(
     "<div class='footer-div'>"
-    "Developed by <b>Cost Engineering - DFEE</b> for internal project cost estimation uses — <b>RT2025</b>"
+    "Developed by <b>Cost Engineering - DFEE</b> for internal project cost estimation uses — <b>RT2025</b><br>"
+    f"Login tracking active • Last cleanup: {datetime.now().strftime('%Y-%m-%d')}"
     "</div>",
     unsafe_allow_html=True
 )
