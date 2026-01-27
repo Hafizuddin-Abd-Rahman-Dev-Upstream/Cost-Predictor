@@ -908,31 +908,103 @@ def main():
             st.info("No components yet. Add at least one above.")
             st.stop()
 
-        # Create DataFrame with all component data
+        # Create DataFrame EXACTLY like Prediction Summary in Data tab
         rows = []
-        for c in comps:
+        for idx, c in enumerate(comps):
+            breakdown = c.get("breakdown", {})
+            inputs = c.get("inputs", {})
+            epcic_costs = breakdown.get("epcic_costs", {})
+            
+            # 1. Start with "Project Name" equivalent - use Component as identifier
             row = {
-                "Component": c["component_type"],
-                "Dataset": c["dataset"],
-                "Model": c.get("model_used", "RandomForest"),
-                "Base CAPEX": float(c["prediction"])
+                "Component": c.get("component_type", f"Component {idx+1}"),
+                "Dataset": c.get("dataset", "Unknown")
             }
             
-            # Add EPCIC breakdown costs
-            epcic_costs = c["breakdown"].get("epcic_costs", {})
-            for phase, cost in epcic_costs.items():
+            # 2. Add ALL input features EXACTLY like Prediction Summary
+            # Prediction Summary shows ALL feature columns from the dataset
+            for feature_name in c.get("feature_cols", []):
+                feature_value = inputs.get(feature_name, np.nan)
+                row[feature_name] = feature_value
+            
+            # 3. Add the target column (Base CAPEX) - this is like target_column in Data tab
+            target_col = breakdown.get("target_col", "Base CAPEX")
+            row[target_col] = float(c.get("prediction", 0.0))
+            
+            # 4. Add EPCIC costs EXACTLY like Prediction Summary
+            # These appear as "Engineering Cost", "Procurement Cost", etc.
+            epcic_phases = ["Engineering", "Procurement", "Construction", "Installation", "Commissioning"]
+            for phase in epcic_phases:
+                cost = epcic_costs.get(phase, 0.0)
                 row[f"{phase} Cost"] = float(cost)
             
-            # Add other cost breakdowns
-            row["Pre-Development Cost"] = float(c["breakdown"].get("predev_cost", 0.0))
-            row["Owner's Cost"] = float(c["breakdown"].get("owners_cost", 0.0))
-            row["Cost Contingency"] = float(c["breakdown"].get("contingency_cost", 0.0))
-            row["Escalation & Inflation"] = float(c["breakdown"].get("escalation_cost", 0.0))
-            row["Grand Total"] = float(c["breakdown"].get("grand_total", 0.0))
+            # 5. Add other cost breakdowns EXACTLY like Prediction Summary
+            row["Pre-Development Cost"] = float(breakdown.get("predev_cost", 0.0))
+            row["Owner's Cost"] = float(breakdown.get("owners_cost", 0.0))
+            row["Cost Contingency"] = float(breakdown.get("contingency_cost", 0.0))
+            row["Escalation & Inflation"] = float(breakdown.get("escalation_cost", 0.0))
+            
+            # 6. Add Grand Total at the end EXACTLY like Prediction Summary
+            row["Grand Total"] = float(breakdown.get("grand_total", 0.0))
             
             rows.append(row)
         
         dfc = pd.DataFrame(rows)
+        
+        # Ensure column order matches Prediction Summary pattern
+        # In Prediction Summary, the order is: features, target, costs, grand total
+        if not dfc.empty:
+            # Define the logical order (matching Prediction Summary)
+            column_order = []
+            
+            # First: Component and Dataset (like Project Name in Data tab)
+            if "Component" in dfc.columns:
+                column_order.append("Component")
+            if "Dataset" in dfc.columns:
+                column_order.append("Dataset")
+            
+            # Second: All feature columns (excluding cost/total columns)
+            feature_columns = []
+            cost_keywords = ["Cost", "Total", "Contingency", "Escalation", "Development", "Owner"]
+            
+            for col in dfc.columns:
+                if col not in column_order:
+                    is_cost_column = any(keyword in col for keyword in cost_keywords)
+                    if not is_cost_column:
+                        feature_columns.append(col)
+            
+            column_order.extend(sorted(feature_columns))
+            
+            # Third: Target column (Base CAPEX)
+            target_col_name = None
+            for col in dfc.columns:
+                if col not in column_order and ("CAPEX" in col or col == breakdown.get("target_col", "")):
+                    target_col_name = col
+                    break
+            
+            if target_col_name and target_col_name in dfc.columns:
+                column_order.append(target_col_name)
+            
+            # Fourth: EPCIC costs in specific order
+            epcic_order = ["Engineering Cost", "Procurement Cost", "Construction Cost", 
+                          "Installation Cost", "Commissioning Cost"]
+            for epcic_col in epcic_order:
+                if epcic_col in dfc.columns:
+                    column_order.append(epcic_col)
+            
+            # Fifth: Other costs in specific order
+            other_costs_order = ["Pre-Development Cost", "Owner's Cost", 
+                                "Cost Contingency", "Escalation & Inflation"]
+            for cost_col in other_costs_order:
+                if cost_col in dfc.columns:
+                    column_order.append(cost_col)
+            
+            # Sixth: Grand Total at the end
+            if "Grand Total" in dfc.columns:
+                column_order.append("Grand Total")
+            
+            # Reorder the dataframe
+            dfc = dfc[column_order]
         
         # Optional: Reorder columns for better readability
         # Define the column order you want
@@ -1107,6 +1179,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
