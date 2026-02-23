@@ -377,7 +377,7 @@ def cost_breakdown(
     escalation_cost = round((float(base_pred) + owners_cost) * (esc_pct / 100.0), 2)
 
     eprr_costs = {k: round(float(base_pred) * (float(v) / 100.0), 2) for k, v in (eprr or {}).items()}
-    grand_total = round(float(base_pred) + owners_cost + contingency_cost + escalation_cost, 2)
+    grand_total = round(float(base_pred) + owners_cost + contingency_cost + escalation_cost + sst_cost, 2)
 
     return owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total
 
@@ -1353,6 +1353,13 @@ with tab_data:
         
         df_floater = st.session_state.floater_dataset
         
+        # Training parameters
+        col1, col2 = st.columns(2)
+        with col1:
+            test_size = st.slider("Test size", 0.1, 0.3, 0.2, 0.05, key="floater_test_size")
+        with col2:
+            n_estimators = st.slider("Number of trees", 50, 200, 100, 10, key="floater_n_estimators")
+        
         if st.button("🚀 Train Floater Model", key="train_floater_model"):
             with st.spinner("Preprocessing data and training model..."):
                 try:
@@ -1384,7 +1391,7 @@ with tab_data:
                     ])
                     
                     categorical_transformer = Pipeline(steps=[
-                        ('imputer', SimpleImputer(strategy='most_frequent')),
+                        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
                         ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
                     ])
                     
@@ -1397,14 +1404,15 @@ with tab_data:
                     # Create and train model pipeline
                     model_pipeline = Pipeline([
                         ('preprocessor', preprocessor),
-                        ('model', RandomForestRegressor(n_estimators=100, random_state=42))
+                        ('model', RandomForestRegressor(n_estimators=n_estimators, random_state=42, n_jobs=-1))
                     ])
                     
                     # Split data
                     X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, random_state=42
+                        X, y, test_size=test_size, random_state=42
                     )
                     
+                    # Train model
                     model_pipeline.fit(X_train, y_train)
                     
                     # Evaluate
@@ -1412,19 +1420,47 @@ with tab_data:
                     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
                     r2 = r2_score(y_test, y_pred)
                     
-                    # Store model and metrics
-                    st.session_state.floater_model = model_pipeline
+                    # Calculate feature importance if possible
+                    feature_importance = None
+                    if hasattr(model_pipeline.named_steps['model'], 'feature_importances_'):
+                        # Get feature names after preprocessing
+                        preprocessor = model_pipeline.named_steps['preprocessor']
+                        feature_names = []
+                        
+                        # Get numerical feature names
+                        feature_names.extend(numerical_cols)
+                        
+                        # Get categorical feature names after one-hot encoding
+                        for i, (name, transformer, cols) in enumerate(preprocessor.transformers_):
+                            if name == 'cat' and len(cols) > 0:
+                                ohe = transformer.named_steps['onehot']
+                                feature_names.extend(ohe.get_feature_names_out(cols))
+                        
+                        importances = model_pipeline.named_steps['model'].feature_importances_
+                        
+                        # Create feature importance dataframe
+                        feature_importance = pd.DataFrame({
+                            'Feature': feature_names[:len(importances)],
+                            'Importance': importances
+                        }).sort_values('Importance', ascending=False).head(15)
                     
-                    st.session_state.floater_metrics = {
-                        'rmse': rmse,
-                        'r2': r2,
-                        'train_samples': len(X_train),
-                        'test_samples': len(X_test),
-                        'categorical_cols': categorical_cols,
-                        'numerical_cols': numerical_cols
+                    # Store model and metrics
+                    st.session_state.floater_model = {
+                        'pipeline': model_pipeline,
+                        'metrics': {
+                            'rmse': rmse,
+                            'r2': r2,
+                            'train_samples': len(X_train),
+                            'test_samples': len(X_test),
+                            'categorical_cols': categorical_cols,
+                            'numerical_cols': numerical_cols,
+                            'feature_importance': feature_importance
+                        }
                     }
                     
                     # Show results
+                    st.success(f"✅ Model trained successfully!")
+                    
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
                         st.metric("RMSE", f"RM {rmse:,.2f}")
@@ -1435,54 +1471,45 @@ with tab_data:
                     with col4:
                         st.metric("Test Samples", f"{len(X_test):,}")
                     
-                    st.success(f"✅ Model trained successfully! Model can now make predictions.")
-                    
-                    # Feature importance
-                    if hasattr(model_pipeline.named_steps['model'], 'feature_importances_'):
-                        # Get feature names after one-hot encoding
-                        preprocessor = model_pipeline.named_steps['preprocessor']
-                        model = model_pipeline.named_steps['model']
-                        
-                        # Get feature names from one-hot encoder
-                        feature_names = []
-                        for name, transformer, cols in preprocessor.transformers_:
-                            if name == 'cat':
-                                # Get one-hot encoded feature names
-                                ohe = transformer.named_steps['onehot']
-                                encoded_features = ohe.get_feature_names_out(cols)
-                                feature_names.extend(encoded_features)
-                            elif name == 'num':
-                                feature_names.extend(cols)
-                        
-                        importances = model.feature_importances_
-                        
-                        # Create feature importance dataframe
-                        feature_importance_df = pd.DataFrame({
-                            'Feature': feature_names,
-                            'Importance': importances
-                        }).sort_values('Importance', ascending=False).head(15)
-                        
-                        # Plot feature importance
+                    # Display feature importance if available
+                    if feature_importance is not None:
+                        st.markdown("##### Top 15 Feature Importances")
                         fig = px.bar(
-                            feature_importance_df,
+                            feature_importance,
                             x='Importance',
                             y='Feature',
                             orientation='h',
-                            title='Top 15 Feature Importances',
+                            title='Feature Importances',
                             color='Importance',
                             color_continuous_scale='Viridis'
                         )
-                        fig.update_layout(height=400)
+                        fig.update_layout(height=500)
                         st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Show model info
+                    with st.expander("📊 Model Details", expanded=False):
+                        st.write(f"**Model Type:** RandomForestRegressor with {n_estimators} trees")
+                        st.write(f"**Categorical Columns:** {', '.join(categorical_cols) if categorical_cols else 'None'}")
+                        st.write(f"**Numerical Columns:** {', '.join(numerical_cols) if numerical_cols else 'None'}")
                         
                 except Exception as e:
                     st.error(f"Error training model: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
 
     # -------------------------------------------------------------------------
     # FLOATER PREDICTION UI
     # -------------------------------------------------------------------------
-    if st.session_state.floater_dataset is not None:
+    if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Floater Cost Prediction</h4><p>Step 3: Enter parameters for prediction</p>', unsafe_allow_html=True)
+        
+        # Get model info
+        model_data = st.session_state.floater_model
+        model_pipeline = model_data['pipeline']
+        metrics = model_data['metrics']
+        
+        # Display model info
+        st.info(f"✅ Model ready - R² Score: {metrics['r2']:.3f}, RMSE: RM {metrics['rmse']:,.2f}")
         
         # Create form for prediction inputs
         with st.form("floater_prediction_form"):
@@ -1496,7 +1523,7 @@ with tab_data:
                     "FPSO/FSO",
                     options=["FPSO", "FSO"],
                     index=0,
-                    help="Select the type of floater"
+                    key="pred_floater_type"
                 )
                 
                 # Location Dropdown
@@ -1504,24 +1531,30 @@ with tab_data:
                     "Location",
                     options=["PM", "SB", "SK"],
                     index=0,
-                    help="Select location: PM, SB, or SK"
+                    key="pred_location"
                 )
                 
-                # No Of Mooring Chain And Anchor (Text input)
-                mooring_chain_anchor = st.text_input(
+                # No Of Mooring Chain And Anchor
+                mooring_chain_anchor = st.number_input(
                     "No Of Mooring Chain And Anchor",
-                    value="0",
-                    help="Enter number of mooring chains and anchors"
+                    min_value=0,
+                    max_value=20,
+                    value=8,
+                    step=1,
+                    key="pred_mooring_chain"
                 )
                 
-                # No of mid water arch (Text input)
-                mid_water_arch = st.text_input(
+                # No of mid water arch
+                mid_water_arch = st.number_input(
                     "No of mid water arch",
-                    value="0",
-                    help="Enter number of mid water arches"
+                    min_value=0,
+                    max_value=10,
+                    value=2,
+                    step=1,
+                    key="pred_mid_water_arch"
                 )
                 
-                # Mooring chain and anchor handling (Dropdown)
+                # Mooring chain and anchor handling
                 mooring_handling = st.selectbox(
                     "Mooring chain and anchor handling",
                     options=[
@@ -1529,96 +1562,109 @@ with tab_data:
                         "Mooring Chain and anchor pile leave in situ",
                         "Mooring Chain and drag anchor retrieve/release"
                     ],
-                    index=0
+                    index=0,
+                    key="pred_mooring_handling"
                 )
                 
             with col2:
-                # Reimbursable markup (Text input)
-                markup = st.text_input(
+                # Reimbursable markup
+                markup = st.number_input(
                     "Reimbursable markup (%)",
-                    value="0",
-                    help="Enter reimbursable markup percentage"
+                    min_value=0.0,
+                    max_value=100.0,
+                    value=0.0,
+                    step=0.5,
+                    key="pred_markup"
                 )
                 
-                # No of pipeline/riser (Text input)
-                pipeline_riser = st.text_input(
+                # No of pipeline/riser
+                pipeline_riser = st.number_input(
                     "No of pipeline/riser",
-                    value="0",
-                    help="Enter number of pipelines/risers"
+                    min_value=0,
+                    max_value=50,
+                    value=4,
+                    step=1,
+                    key="pred_pipeline_riser"
                 )
                 
-                # Tank cleaning (Dropdown)
+                # Tank cleaning
                 tank_cleaning = st.selectbox(
                     "Tank cleaning",
                     options=["Required", "Not required"],
-                    index=1
+                    index=1,
+                    key="pred_tank_cleaning"
                 )
                 
-                # Tank Capacity (Conditional based on tank cleaning)
+                # Tank Capacity (only show if tank cleaning is Required)
                 if tank_cleaning == "Required":
-                    tank_capacity = st.text_input(
+                    tank_capacity = st.number_input(
                         "Tank Capacity (bbl)",
-                        value="0",
-                        help="Enter tank capacity in barrels"
+                        min_value=0,
+                        max_value=1000000,
+                        value=400000,
+                        step=10000,
+                        key="pred_tank_capacity"
                     )
                     
                     # Show tank size classification
-                    if tank_capacity:
-                        try:
-                            cap = float(tank_capacity)
-                            if cap <= 400000:
-                                size_class = "Panamax (≤400,000 bbl)"
-                            elif cap <= 600000:
-                                size_class = "Aframax (≤600,000 bbl)"
-                            else:
-                                size_class = "Suezmax (≤1,000,000 bbl)"
-                            st.info(f"Classification: {size_class}")
-                        except:
-                            pass
+                    if tank_capacity > 0:
+                        if tank_capacity <= 400000:
+                            size_class = "Panamax (≤400,000 bbl)"
+                        elif tank_capacity <= 600000:
+                            size_class = "Aframax (≤600,000 bbl)"
+                        elif tank_capacity <= 1000000:
+                            size_class = "Suezmax (≤1,000,000 bbl)"
+                        else:
+                            size_class = "VLCC (>1,000,000 bbl)"
+                        st.caption(f"Classification: {size_class}")
                 else:
-                    tank_capacity = "0"
+                    tank_capacity = 0
                 
-                # Isolation, flushing and cleaning of topside (Dropdown)
+                # Isolation, flushing and cleaning of topside
                 topside_cleaning = st.selectbox(
                     "Isolation, flushing and cleaning of topside",
                     options=["Required", "Not required"],
-                    index=1
+                    index=1,
+                    key="pred_topside_cleaning"
                 )
                 
-                # Number of subsystem (Text input)
-                subsystem = st.text_input(
+                # Number of subsystem
+                subsystem = st.number_input(
                     "Number of subsystem",
-                    value="0",
-                    help="Enter number of subsystems"
+                    min_value=0,
+                    max_value=20,
+                    value=5,
+                    step=1,
+                    key="pred_subsystem"
                 )
             
             # Prediction button
             submit_prediction = st.form_submit_button("💰 Predict Cost")
             
-            if submit_prediction and st.session_state.floater_model:
+            if submit_prediction:
                 try:
-                    # Prepare input data
+                    # Prepare input data as a DataFrame with the correct columns
                     input_dict = {
                         'FPSO/FSO': floater_type,
                         'Location': location,
-                        'No Of Mooring Chain And Anchor': float(mooring_chain_anchor) if mooring_chain_anchor else 0,
-                        'No of mid water arch': float(mid_water_arch) if mid_water_arch else 0,
+                        'No Of Mooring Chain And Anchor': float(mooring_chain_anchor),
+                        'No of mid water arch': float(mid_water_arch),
                         'mooring chain and anchor handling': mooring_handling,
-                        'Reimbursable markup': float(markup) if markup else 0,
-                        'No of pipeline/riser': float(pipeline_riser) if pipeline_riser else 0,
+                        'Reimbursable markup': float(markup),
+                        'No of pipeline/riser': float(pipeline_riser),
                         'Tank cleaning': tank_cleaning,
-                        'Tank Capacity(bbl)': float(tank_capacity) if tank_capacity else 0,
+                        'Tank Capacity(bbl)': float(tank_capacity),
                         'Isolation, flushing and cleaning of topside': topside_cleaning,
-                        'number of subsystem': float(subsystem) if subsystem else 0
+                        'number of subsystem': float(subsystem)
                     }
                     
-                    # Create DataFrame with correct column order
-                    feature_cols = st.session_state.floater_feature_columns
-                    input_data = {col: input_dict.get(col, 0) for col in feature_cols}
-                    input_df = pd.DataFrame([input_data])
+                    # Create DataFrame with the exact columns the model expects
+                    input_df = pd.DataFrame([input_dict])
+                    
+                    # Ensure column order matches training data
+                    input_df = input_df[st.session_state.floater_feature_columns]
                     
                     # Make prediction
-                    model_pipeline = st.session_state.floater_model
                     prediction = model_pipeline.predict(input_df)[0]
                     
                     # Store prediction
@@ -1636,14 +1682,13 @@ with tab_data:
                     col1, col2, col3 = st.columns(3)
                     with col1:
                         st.metric(
-                            "Predicted Cost",
-                            f"RM {prediction:,.2f}",
-                            delta="Prediction"
+                            "Base Cost",
+                            f"RM {prediction:,.2f}"
                         )
                     
                     with col2:
                         # Calculate with markup
-                        markup_amount = prediction * (float(markup) / 100) if markup else 0
+                        markup_amount = prediction * (markup / 100)
                         st.metric(
                             "Markup Amount",
                             f"RM {markup_amount:,.2f}",
@@ -1653,18 +1698,22 @@ with tab_data:
                     with col3:
                         total_with_markup = prediction + markup_amount
                         st.metric(
-                            "Total Cost",
-                            f"RM {total_with_markup:,.2f}",
-                            delta="Incl. markup"
+                            "Total Cost (with markup)",
+                            f"RM {total_with_markup:,.2f}"
                         )
                     
                     # Show input summary
                     with st.expander("📋 Input Summary", expanded=False):
                         summary_df = pd.DataFrame([input_dict])
                         st.dataframe(summary_df, use_container_width=True)
-                        
+                    
+                    # Show confidence interval
+                    st.info(f"📊 Model confidence: R² = {metrics['r2']:.3f}, Typical error range: ±RM {metrics['rmse']:,.2f}")
+                    
                 except Exception as e:
                     st.error(f"Error making prediction: {e}")
+                    import traceback
+                    st.error(traceback.format_exc())
 
     # -------------------------------------------------------------------------
     # FLOATER PREDICTION HISTORY
@@ -1678,7 +1727,7 @@ with tab_data:
         # Display in a nice table
         display_cols = ['Timestamp', 'FPSO/FSO', 'Location', 'Predicted Cost (RM)']
         if 'Tank cleaning' in history_df.columns:
-            display_cols.insert(3, 'Tank cleaning')
+            display_cols.append('Tank cleaning')
         
         st.dataframe(
             history_df[display_cols].sort_values('Timestamp', ascending=False),
@@ -1713,7 +1762,7 @@ with tab_data:
     # -------------------------------------------------------------------------
     # BATCH PREDICTION FOR FLOATER
     # -------------------------------------------------------------------------
-    if st.session_state.floater_model:
+    if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Batch Prediction</h4><p>Upload Excel for multiple predictions</p>', unsafe_allow_html=True)
         
         batch_file = st.file_uploader(
@@ -1729,7 +1778,6 @@ with tab_data:
                 
                 # Check required columns
                 required_cols = st.session_state.floater_feature_columns
-                
                 missing_cols = [col for col in required_cols if col not in batch_df.columns]
                 
                 if missing_cols:
@@ -1737,7 +1785,7 @@ with tab_data:
                 else:
                     if st.button("🔢 Run Batch Prediction", key="run_batch_floater"):
                         with st.spinner("Processing batch prediction..."):
-                            model_pipeline = st.session_state.floater_model
+                            model_pipeline = st.session_state.floater_model['pipeline']
                             
                             # Prepare data (ensure correct column order)
                             batch_processed = batch_df[required_cols].copy()
@@ -1785,44 +1833,12 @@ with tab_data:
                 st.error(f"Error processing batch file: {e}")
 
     # -------------------------------------------------------------------------
-    # FLOATER MODEL INFO
-    # -------------------------------------------------------------------------
-    if st.session_state.floater_model and st.session_state.floater_metrics:
-        st.markdown('<h4 style="margin:0;color:#000;">Model Information</h4>', unsafe_allow_html=True)
-        
-        with st.expander("📈 Model Performance Metrics", expanded=False):
-            metrics = st.session_state.floater_metrics
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("RMSE", f"RM {metrics['rmse']:,.2f}")
-            with col2:
-                st.metric("R² Score", f"{metrics['r2']:.3f}")
-            with col3:
-                st.metric("Training Samples", f"{metrics['train_samples']:,}")
-            with col4:
-                st.metric("Test Samples", f"{metrics['test_samples']:,}")
-        
-        with st.expander("⚙️ Model Configuration", expanded=False):
-            metrics = st.session_state.floater_metrics
-            st.write(f"**Model Type:** RandomForest Regressor")
-            st.write(f"**Number of Features:** {len(st.session_state.floater_feature_columns)}")
-            st.write(f"**Categorical Columns:** {', '.join(metrics['categorical_cols']) if metrics['categorical_cols'] else 'None'}")
-            st.write(f"**Numerical Columns:** {', '.join(metrics['numerical_cols']) if metrics['numerical_cols'] else 'None'}")
-            st.write(f"**Pipeline Steps:**")
-            st.write("  - Preprocessor: ColumnTransformer")
-            st.write("    - Numerical: SimpleImputer → MinMaxScaler")
-            st.write("    - Categorical: SimpleImputer → OneHotEncoder")
-            st.write("  - Model: RandomForestRegressor (100 estimators)")
-
-    # -------------------------------------------------------------------------
     # RESET FLOATER SECTION
     # -------------------------------------------------------------------------
     st.markdown("---")
     if st.button("🔄 Reset Floater Section", key="reset_floater"):
         st.session_state.floater_dataset = None
         st.session_state.floater_model = None
-        st.session_state.floater_metrics = None
         st.session_state.floater_predictions = []
         st.session_state.floater_feature_columns = []
         toast("Floater section reset successfully.")
@@ -1953,7 +1969,7 @@ with tab_pb:
                     st.session_state.projects[proj_sel]["components"].append(comp_entry)
                     st.session_state.component_labels[dataset_for_comp] = component_type or default_label
 
-                    # Currency for project should follow dataset currency (USD if last target col is USD)
+                    # Currency for project should follow dataset currency
                     st.session_state.projects[proj_sel]["currency"] = currency_ds
 
                     toast(f"Component added to project '{proj_sel}'.")
