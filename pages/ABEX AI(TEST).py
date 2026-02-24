@@ -1814,10 +1814,18 @@ with tab_data:
                 st.rerun()
 
     # -------------------------------------------------------------------------
-    # BATCH PREDICTION FOR FLOATER
+    # FLOATER BATCH PREDICTION - FIXED TO MATCH SINGLE PREDICTION
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Batch Prediction</h4><p>Upload Excel for multiple predictions</p>', unsafe_allow_html=True)
+        
+        # Get model info
+        model_data = st.session_state.floater_model
+        model_pipeline = model_data['pipeline']
+        metrics = model_data['metrics']
+        expected_columns = st.session_state.floater_feature_columns
+        categorical_cols = metrics['categorical_cols']
+        numerical_cols = metrics['numerical_cols']
         
         batch_file = st.file_uploader(
             "Upload Excel file for batch prediction",
@@ -1830,58 +1838,107 @@ with tab_data:
                 # Read Excel file
                 batch_df = pd.read_excel(batch_file)
                 
+                st.write("📊 Uploaded Data Preview:")
+                st.dataframe(batch_df.head())
+                
                 # Check required columns
-                required_cols = st.session_state.floater_feature_columns
-                missing_cols = [col for col in required_cols if col not in batch_df.columns]
+                missing_cols = [col for col in expected_columns if col not in batch_df.columns]
                 
                 if missing_cols:
                     st.error(f"Missing required columns: {', '.join(missing_cols)}")
+                    st.info(f"Expected columns: {', '.join(expected_columns)}")
                 else:
                     if st.button("🔢 Run Batch Prediction", key="run_batch_floater"):
                         with st.spinner("Processing batch prediction..."):
-                            model_pipeline = st.session_state.floater_model['pipeline']
-                            
-                            # Prepare data (ensure correct column order)
-                            batch_processed = batch_df[required_cols].copy()
-                            
-                            # Handle missing values in batch data
-                            for col in batch_processed.columns:
-                                if batch_processed[col].dtype == 'object':
-                                    batch_processed[col].fillna(batch_processed[col].mode()[0] if not batch_processed[col].mode().empty else "Unknown", inplace=True)
-                                else:
-                                    batch_processed[col].fillna(batch_processed[col].median(), inplace=True)
-                            
-                            # Make predictions
-                            predictions = model_pipeline.predict(batch_processed)
-                            
-                            # Add predictions to original dataframe
-                            batch_df['Predicted Cost (RM)'] = predictions
-                            
-                            # Calculate total with markup if markup column exists
-                            if 'ReimbursableMarkup' in batch_df.columns:
-                                batch_df['Total with Markup (RM)'] = batch_df.apply(
-                                    lambda row: row['Predicted Cost (RM)'] + (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
-                                    axis=1
+                            try:
+                                # Process each row exactly like single prediction
+                                processed_rows = []
+                                
+                                for idx, row in batch_df.iterrows():
+                                    # Build input dictionary with correct data types
+                                    input_dict = {}
+                                    
+                                    # Add categorical columns as strings
+                                    for col in categorical_cols:
+                                        val = row[col]
+                                        if pd.isna(val) or val is None:
+                                            input_dict[col] = "Unknown"
+                                        else:
+                                            input_dict[col] = str(val).strip()
+                                    
+                                    # Add numerical columns as floats
+                                    for col in numerical_cols:
+                                        val = row[col]
+                                        if pd.isna(val) or val is None:
+                                            input_dict[col] = 0.0
+                                        else:
+                                            try:
+                                                input_dict[col] = float(val)
+                                            except:
+                                                input_dict[col] = 0.0
+                                    
+                                    processed_rows.append(input_dict)
+                                
+                                # Create DataFrame with correct dtypes
+                                processed_df = pd.DataFrame(processed_rows)
+                                
+                                # Ensure column order matches training data
+                                processed_df = processed_df[expected_columns]
+                                
+                                # Debug info - show data types
+                                st.write("Debug - Processed Data Types:")
+                                st.write(processed_df.dtypes)
+                                
+                                # Make predictions
+                                predictions = model_pipeline.predict(processed_df)
+                                
+                                # Add predictions to original dataframe
+                                batch_df['Predicted Cost (RM)'] = predictions
+                                
+                                # Calculate with markup if markup column exists
+                                if 'ReimbursableMarkup' in batch_df.columns:
+                                    batch_df['Total with Markup (RM)'] = batch_df.apply(
+                                        lambda row: row['Predicted Cost (RM)'] + 
+                                                   (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
+                                        axis=1
+                                    )
+                                
+                                # Display results with statistics
+                                st.success(f"✅ Batch prediction complete! Processed {len(batch_df)} records.")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Min Prediction", f"RM {predictions.min():,.2f}")
+                                with col2:
+                                    st.metric("Max Prediction", f"RM {predictions.max():,.2f}")
+                                with col3:
+                                    st.metric("Avg Prediction", f"RM {predictions.mean():,.2f}")
+                                
+                                with st.expander("📊 Detailed Results", expanded=True):
+                                    st.dataframe(batch_df, use_container_width=True)
+                                
+                                # Download button
+                                batch_buffer = io.BytesIO()
+                                with pd.ExcelWriter(batch_buffer, engine='openpyxl') as writer:
+                                    batch_df.to_excel(writer, index=False, sheet_name='Batch Predictions')
+                                batch_buffer.seek(0)
+                                
+                                st.download_button(
+                                    label="📥 Download Batch Results",
+                                    data=batch_buffer,
+                                    file_name="floater_batch_predictions.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
-                            
-                            # Display results
-                            st.success(f"✅ Batch prediction complete! Processed {len(batch_df)} records.")
-                            
-                            with st.expander("📊 Batch Results", expanded=True):
-                                st.dataframe(batch_df, use_container_width=True)
-                            
-                            # Download button for batch results
-                            batch_buffer = io.BytesIO()
-                            with pd.ExcelWriter(batch_buffer, engine='openpyxl') as writer:
-                                batch_df.to_excel(writer, index=False, sheet_name='Batch Predictions')
-                            batch_buffer.seek(0)
-                            
-                            st.download_button(
-                                label="📥 Download Batch Results",
-                                data=batch_buffer,
-                                file_name="floater_batch_predictions.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                            )
+                                
+                                # Compare with latest single prediction if available
+                                if st.session_state.floater_predictions:
+                                    latest_single = st.session_state.floater_predictions[-1]
+                                    st.info(f"Latest single prediction: RM {latest_single['Predicted Cost (RM)']:,.2f}")
+                                
+                            except Exception as e:
+                                st.error(f"Error during prediction: {e}")
+                                import traceback
+                                st.error(traceback.format_exc())
                             
             except Exception as e:
                 st.error(f"Error processing batch file: {e}")
