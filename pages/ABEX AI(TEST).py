@@ -1444,7 +1444,7 @@ with tab_data:
                             'Importance': importances
                         }).sort_values('Importance', ascending=False).head(15)
                     
-                    # Store model and metrics
+                    # Store model and metrics - MAKE SURE TO INCLUDE COLUMN TYPES
                     st.session_state.floater_model = {
                         'pipeline': model_pipeline,
                         'metrics': {
@@ -1508,11 +1508,16 @@ with tab_data:
         model_pipeline = model_data['pipeline']
         metrics = model_data['metrics']
         expected_columns = st.session_state.floater_feature_columns
+        categorical_cols = metrics['categorical_cols']
+        numerical_cols = metrics['numerical_cols']
         
         # Display expected columns for debugging (optional)
         with st.expander("📋 Model Expected Columns", expanded=False):
-            st.write("The model expects these column names:")
-            for col in expected_columns:
+            st.write("**Categorical Columns:**")
+            for col in categorical_cols:
+                st.write(f"- {col}")
+            st.write("**Numerical Columns:**")
+            for col in numerical_cols:
                 st.write(f"- {col}")
         
         # Display model info
@@ -1573,7 +1578,7 @@ with tab_data:
                     key="pred_mooring_handling"
                 )
                 
-                # Vessel Class (based on tank capacity)
+                # Vessel Class
                 vessel_class = st.selectbox(
                     "Vessel Class",
                     options=["Panamax", "Aframax", "Suezmax", "VLCC"],
@@ -1655,42 +1660,50 @@ with tab_data:
             
             if submit_prediction:
                 try:
-                    # Map input values to the exact column names expected by the model
+                    # Build input dictionary with correct data types
                     input_dict = {}
                     
-                    # Map each expected column to the corresponding input value
-                    for col in expected_columns:
+                    # Add categorical columns as strings
+                    for col in categorical_cols:
                         if col == 'UnitType':
                             input_dict[col] = unit_type
                         elif col == 'Location':
                             input_dict[col] = location
-                        elif col == 'NoMooringChainAnchor':
-                            input_dict[col] = float(mooring_chain_anchor)
-                        elif col == 'NoMidWaterArch':
-                            input_dict[col] = float(mid_water_arch)
                         elif col == 'MooringHandling':
                             input_dict[col] = mooring_handling
-                        elif col == 'ReimbursableMarkup':
-                            input_dict[col] = float(markup)
-                        elif col == 'NoPipelineRiser':
-                            input_dict[col] = float(pipeline_riser)
                         elif col == 'TankCleaning':
                             input_dict[col] = tank_cleaning
-                        elif col == 'TankCapacity_bbl':
-                            input_dict[col] = float(tank_capacity)
                         elif col == 'VesselClass':
                             input_dict[col] = vessel_class
                         elif col == 'TopsideIsolationCleaning':
                             input_dict[col] = topside_cleaning
+                        else:
+                            # Default for any other categorical columns
+                            input_dict[col] = "Unknown"
+                    
+                    # Add numerical columns as floats
+                    for col in numerical_cols:
+                        if col == 'NoMooringChainAnchor':
+                            input_dict[col] = float(mooring_chain_anchor)
+                        elif col == 'NoMidWaterArch':
+                            input_dict[col] = float(mid_water_arch)
+                        elif col == 'ReimbursableMarkup':
+                            input_dict[col] = float(markup)
+                        elif col == 'NoPipelineRiser':
+                            input_dict[col] = float(pipeline_riser)
+                        elif col == 'TankCapacity_bbl':
+                            input_dict[col] = float(tank_capacity)
                         elif col == 'Number of subsystem':
                             input_dict[col] = float(subsystem)
                         else:
-                            # If column not recognized, set a default value
-                            st.warning(f"Unknown column: {col}, setting default value")
-                            input_dict[col] = 0
+                            # Default for any other numerical columns
+                            input_dict[col] = 0.0
                     
                     # Create DataFrame with the exact columns the model expects
                     input_df = pd.DataFrame([input_dict])
+                    
+                    # Ensure column order matches training data
+                    input_df = input_df[expected_columns]
                     
                     # Make prediction
                     prediction = model_pipeline.predict(input_df)[0]
