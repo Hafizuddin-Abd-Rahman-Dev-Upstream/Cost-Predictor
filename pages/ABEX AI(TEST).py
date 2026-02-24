@@ -1309,7 +1309,7 @@ with tab_data:
         "Upload Floater Training CSV", 
         type="csv",
         key="floater_csv_uploader",
-        help="CSV should contain columns: FPSO/FSO, Location, No Of Mooring Chain And Anchor, No of mid water arch, mooring chain and anchor handling, Reimbursable markup, No of pipeline/riser, Tank cleaning, Tank Capacity(bbl), Isolation, flushing and cleaning of topside, number of subsystem, Cost(RM)"
+        help="CSV should contain columns: UnitType, Location, NoMooringChainAnchor, NoMidWaterArch, MooringHandling, ReimbursableMarkup, NoPipelineRiser, TankCleaning, TankCapacity_bbl, VesselClass, TopsideIsolationCleaning, Number of subsystem, Cost(RM)"
     )
 
     if floater_file is not None:
@@ -1507,6 +1507,13 @@ with tab_data:
         model_data = st.session_state.floater_model
         model_pipeline = model_data['pipeline']
         metrics = model_data['metrics']
+        expected_columns = st.session_state.floater_feature_columns
+        
+        # Display expected columns for debugging (optional)
+        with st.expander("📋 Model Expected Columns", expanded=False):
+            st.write("The model expects these column names:")
+            for col in expected_columns:
+                st.write(f"- {col}")
         
         # Display model info
         st.info(f"✅ Model ready - R² Score: {metrics['r2']:.3f}, RMSE: RM {metrics['rmse']:,.2f}")
@@ -1518,15 +1525,15 @@ with tab_data:
             col1, col2 = st.columns(2)
             
             with col1:
-                # FPSO/FSO Dropdown
-                floater_type = st.selectbox(
-                    "FPSO/FSO",
+                # UnitType (FPSO/FSO)
+                unit_type = st.selectbox(
+                    "Unit Type",
                     options=["FPSO", "FSO"],
                     index=0,
-                    key="pred_floater_type"
+                    key="pred_unit_type"
                 )
                 
-                # Location Dropdown
+                # Location
                 location = st.selectbox(
                     "Location",
                     options=["PM", "SB", "SK"],
@@ -1566,6 +1573,14 @@ with tab_data:
                     key="pred_mooring_handling"
                 )
                 
+                # Vessel Class (based on tank capacity)
+                vessel_class = st.selectbox(
+                    "Vessel Class",
+                    options=["Panamax", "Aframax", "Suezmax", "VLCC"],
+                    index=0,
+                    key="pred_vessel_class"
+                )
+                
             with col2:
                 # Reimbursable markup
                 markup = st.number_input(
@@ -1595,29 +1610,27 @@ with tab_data:
                     key="pred_tank_cleaning"
                 )
                 
-                # Tank Capacity (only show if tank cleaning is Required)
-                tank_capacity = 0
-                if tank_cleaning == "Required":
-                    tank_capacity = st.number_input(
-                        "Tank Capacity (bbl)",
-                        min_value=0,
-                        max_value=1000000,
-                        value=400000,
-                        step=10000,
-                        key="pred_tank_capacity"
-                    )
-                    
-                    # Show tank size classification
-                    if tank_capacity > 0:
-                        if tank_capacity <= 400000:
-                            size_class = "Panamax (≤400,000 bbl)"
-                        elif tank_capacity <= 600000:
-                            size_class = "Aframax (≤600,000 bbl)"
-                        elif tank_capacity <= 1000000:
-                            size_class = "Suezmax (≤1,000,000 bbl)"
-                        else:
-                            size_class = "VLCC (>1,000,000 bbl)"
-                        st.caption(f"Classification: {size_class}")
+                # Tank Capacity
+                tank_capacity = st.number_input(
+                    "Tank Capacity (bbl)",
+                    min_value=0,
+                    max_value=1000000,
+                    value=400000,
+                    step=10000,
+                    key="pred_tank_capacity"
+                )
+                
+                # Show tank size classification
+                if tank_capacity > 0:
+                    if tank_capacity <= 400000:
+                        detected_class = "Panamax"
+                    elif tank_capacity <= 600000:
+                        detected_class = "Aframax"
+                    elif tank_capacity <= 1000000:
+                        detected_class = "Suezmax"
+                    else:
+                        detected_class = "VLCC"
+                    st.caption(f"Detected Class: {detected_class}")
                 
                 # Isolation, flushing and cleaning of topside
                 topside_cleaning = st.selectbox(
@@ -1642,33 +1655,60 @@ with tab_data:
             
             if submit_prediction:
                 try:
-                    # Prepare input data as a DataFrame with the correct columns
-                    input_dict = {
-                        'FPSO/FSO': floater_type,
-                        'Location': location,
-                        'No Of Mooring Chain And Anchor': float(mooring_chain_anchor),
-                        'No of mid water arch': float(mid_water_arch),
-                        'mooring chain and anchor handling': mooring_handling,
-                        'Reimbursable markup': float(markup),
-                        'No of pipeline/riser': float(pipeline_riser),
-                        'Tank cleaning': tank_cleaning,
-                        'Tank Capacity(bbl)': float(tank_capacity),
-                        'Isolation, flushing and cleaning of topside': topside_cleaning,
-                        'number of subsystem': float(subsystem)
-                    }
+                    # Map input values to the exact column names expected by the model
+                    input_dict = {}
+                    
+                    # Map each expected column to the corresponding input value
+                    for col in expected_columns:
+                        if col == 'UnitType':
+                            input_dict[col] = unit_type
+                        elif col == 'Location':
+                            input_dict[col] = location
+                        elif col == 'NoMooringChainAnchor':
+                            input_dict[col] = float(mooring_chain_anchor)
+                        elif col == 'NoMidWaterArch':
+                            input_dict[col] = float(mid_water_arch)
+                        elif col == 'MooringHandling':
+                            input_dict[col] = mooring_handling
+                        elif col == 'ReimbursableMarkup':
+                            input_dict[col] = float(markup)
+                        elif col == 'NoPipelineRiser':
+                            input_dict[col] = float(pipeline_riser)
+                        elif col == 'TankCleaning':
+                            input_dict[col] = tank_cleaning
+                        elif col == 'TankCapacity_bbl':
+                            input_dict[col] = float(tank_capacity)
+                        elif col == 'VesselClass':
+                            input_dict[col] = vessel_class
+                        elif col == 'TopsideIsolationCleaning':
+                            input_dict[col] = topside_cleaning
+                        elif col == 'Number of subsystem':
+                            input_dict[col] = float(subsystem)
+                        else:
+                            # If column not recognized, set a default value
+                            st.warning(f"Unknown column: {col}, setting default value")
+                            input_dict[col] = 0
                     
                     # Create DataFrame with the exact columns the model expects
                     input_df = pd.DataFrame([input_dict])
                     
-                    # Ensure column order matches training data
-                    input_df = input_df[st.session_state.floater_feature_columns]
-                    
                     # Make prediction
                     prediction = model_pipeline.predict(input_df)[0]
                     
-                    # Store prediction
+                    # Store prediction with user-friendly column names
                     prediction_record = {
-                        **input_dict,
+                        'Unit Type': unit_type,
+                        'Location': location,
+                        'Mooring Chain & Anchor': mooring_chain_anchor,
+                        'Mid Water Arch': mid_water_arch,
+                        'Mooring Handling': mooring_handling,
+                        'Markup (%)': markup,
+                        'Pipeline/Riser': pipeline_riser,
+                        'Tank Cleaning': tank_cleaning,
+                        'Tank Capacity (bbl)': tank_capacity,
+                        'Vessel Class': vessel_class,
+                        'Topside Cleaning': topside_cleaning,
+                        'Subsystems': subsystem,
                         'Predicted Cost (RM)': float(prediction),
                         'Timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
@@ -1703,8 +1743,10 @@ with tab_data:
                     
                     # Show input summary
                     with st.expander("📋 Input Summary", expanded=False):
-                        summary_df = pd.DataFrame([input_dict])
-                        st.dataframe(summary_df, use_container_width=True)
+                        summary_df = pd.DataFrame([prediction_record])
+                        # Drop timestamp for cleaner display
+                        display_cols = [c for c in summary_df.columns if c != 'Timestamp']
+                        st.dataframe(summary_df[display_cols], use_container_width=True)
                     
                     # Show confidence interval
                     st.info(f"📊 Model confidence: R² = {metrics['r2']:.3f}, Typical error range: ±RM {metrics['rmse']:,.2f}")
@@ -1724,9 +1766,9 @@ with tab_data:
         history_df = pd.DataFrame(st.session_state.floater_predictions)
         
         # Display in a nice table
-        display_cols = ['Timestamp', 'FPSO/FSO', 'Location', 'Predicted Cost (RM)']
-        if 'Tank cleaning' in history_df.columns:
-            display_cols.append('Tank cleaning')
+        display_cols = ['Timestamp', 'Unit Type', 'Location', 'Predicted Cost (RM)']
+        if 'Tank Cleaning' in history_df.columns:
+            display_cols.append('Tank Cleaning')
         
         st.dataframe(
             history_df[display_cols].sort_values('Timestamp', ascending=False),
@@ -1803,9 +1845,9 @@ with tab_data:
                             batch_df['Predicted Cost (RM)'] = predictions
                             
                             # Calculate total with markup if markup column exists
-                            if 'Reimbursable markup' in batch_df.columns:
+                            if 'ReimbursableMarkup' in batch_df.columns:
                                 batch_df['Total with Markup (RM)'] = batch_df.apply(
-                                    lambda row: row['Predicted Cost (RM)'] + (row['Predicted Cost (RM)'] * (row['Reimbursable markup'] / 100)),
+                                    lambda row: row['Predicted Cost (RM)'] + (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
                                     axis=1
                                 )
                             
