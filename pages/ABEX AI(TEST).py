@@ -1431,7 +1431,7 @@ with tab_data:
                         feature_names.extend(numerical_cols)
                         
                         # Get categorical feature names after one-hot encoding
-                        for i, (name, transformer, cols) in enumerate(preprocessor.transformers_):
+                        for name, transformer, cols in preprocessor.transformers_:
                             if name == 'cat' and len(cols) > 0:
                                 ohe = transformer.named_steps['onehot']
                                 feature_names.extend(ohe.get_feature_names_out(cols))
@@ -1596,6 +1596,7 @@ with tab_data:
                 )
                 
                 # Tank Capacity (only show if tank cleaning is Required)
+                tank_capacity = 0
                 if tank_cleaning == "Required":
                     tank_capacity = st.number_input(
                         "Tank Capacity (bbl)",
@@ -1617,8 +1618,6 @@ with tab_data:
                         else:
                             size_class = "VLCC (>1,000,000 bbl)"
                         st.caption(f"Classification: {size_class}")
-                else:
-                    tank_capacity = 0
                 
                 # Isolation, flushing and cleaning of topside
                 topside_cleaning = st.selectbox(
