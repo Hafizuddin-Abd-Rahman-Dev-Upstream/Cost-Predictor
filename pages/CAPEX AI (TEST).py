@@ -1,7 +1,8 @@
 # ======================================================================================
 # CAPEX AI RT2026 
 #
-# ENHANCED VERSION: Shows imputed feature values after prediction.
+# ENHANCED VERSION: Shows imputed feature values after prediction AND includes them
+#                   in the downloaded Excel/CSV files.
 #
 # requirements.txt:
 # streamlit
@@ -1030,14 +1031,14 @@ with tab_data:
                     except:
                         input_values[feature] = np.nan
     
-    # ----- NEW: Checkbox for KNN imputation -----
+    # ----- Checkbox for KNN imputation -----
     use_knn = st.checkbox(
         "🔮 Use intelligent imputation for missing features (KNN)",
         value=False,
         key=f"use_knn_{ds_name_pred}",
         help="When enabled, missing feature values are estimated from similar rows in the training data using the features you provide."
     )
-    # ---------------------------------------------
+    # -----------------------------------------
     
     # Prediction button
     if st.button("Run Prediction", key="run_pred_btn", type="primary"):
@@ -1063,7 +1064,7 @@ with tab_data:
             # Make prediction
             base_pred = float(pipeline.predict(pred_input)[0])
             
-            # --- NEW: Show imputed feature values ---
+            # --- Show imputed feature values ---
             st.markdown("##### Feature Values Used for Prediction")
             st.caption(f"Imputation method: **{imputation_method}**")
             
@@ -1095,14 +1096,14 @@ with tab_data:
             
             df_comp = pd.DataFrame(comparison)
             st.dataframe(df_comp, use_container_width=True, height=min(400, 35 * len(feature_cols)))
-            # --- End new section ---
+            # ------------------------------------
             
             # Calculate cost breakdown
             owners_cost, sst_cost, contingency_cost, escalation_cost, grand_total = cost_breakdown(
                 base_pred, sst_pct, owners_pct, cont_pct, esc_pct
             )
             
-            # Create result entry
+            # ----- NEW: Build result dictionary with ALL feature values (the ones actually used) -----
             result = {
                 "Project Name": project_name,
                 "Base CAPEX": round(base_pred, 2),
@@ -1111,12 +1112,14 @@ with tab_data:
                 "Contingency": contingency_cost,
                 "Escalation": escalation_cost,
                 "Grand Total": grand_total,
-                "Target": round(base_pred, 2)  # Same as Base CAPEX for compatibility
+                "Target": round(base_pred, 2),  # Same as Base CAPEX for compatibility
+                "_imputation_method": imputation_method
             }
             
-            # Add feature values
-            for feature in feature_cols:
-                result[feature] = original_inputs.get(feature, np.nan)
+            # Add each feature's value (the final used value) as a separate column
+            for col in feature_cols:
+                result[col] = pred_input[col].iloc[0]
+            # -----------------------------------------------------------------------------------------
             
             # Store prediction
             st.session_state.predictions.setdefault(ds_name_pred, []).append(result)
@@ -1185,6 +1188,7 @@ with tab_data:
                             "Target": round(base_pred_batch, 2)
                         }
                         
+                        # For batch, we don't have imputed values; store original inputs
                         for feature in feature_cols:
                             result_batch[feature] = row.get(feature, np.nan)
                         
@@ -1207,32 +1211,39 @@ with tab_data:
     
     if preds:
         df_preds = pd.DataFrame(preds)
+        
+        # ---- Display a clean table (only key metrics) ----
         display_cols = ["Project Name", "Base CAPEX", "Owner's Cost", "SST Cost", 
                        "Contingency", "Escalation", "Grand Total"]
+        # Only include columns that actually exist
+        display_cols = [c for c in display_cols if c in df_preds.columns]
         df_display = df_preds[display_cols].copy()
         
         for col in display_cols[1:]:
             df_display[col] = df_display[col].apply(lambda x: f"{x:,.2f}" if not pd.isna(x) else "")
         
         st.dataframe(df_display, use_container_width=True, height=300)
+        # --------------------------------------------------
         
         st.markdown("##### Export Results")
         col1, col2 = st.columns(2)
         with col1:
+            # Excel export – include ALL columns (features, imputed values, etc.)
             bio_xlsx = io.BytesIO()
             df_preds.to_excel(bio_xlsx, index=False, engine="openpyxl")
             bio_xlsx.seek(0)
             st.download_button(
-                "⬇️ Download Excel",
+                "⬇️ Download Excel (with all features)",
                 data=bio_xlsx,
                 file_name=f"{ds_name_res}_predictions.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_excel_btn"
             )
         with col2:
+            # CSV export – include ALL columns
             csv_data = df_preds.to_csv(index=False)
             st.download_button(
-                "⬇️ Download CSV",
+                "⬇️ Download CSV (with all features)",
                 data=csv_data,
                 file_name=f"{ds_name_res}_predictions.csv",
                 mime="text/csv",
