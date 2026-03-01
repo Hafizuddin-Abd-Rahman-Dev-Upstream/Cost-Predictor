@@ -1,6 +1,8 @@
 # ======================================================================================
 # CAPEX AI RT2026 
 #
+# ENHANCED VERSION: Shows imputed feature values after prediction.
+#
 # requirements.txt:
 # streamlit
 # pandas
@@ -1043,19 +1045,57 @@ with tab_data:
             # Prepare input data
             pred_input = ModelPipeline.prepare_prediction_input(feature_cols, input_values)
             
-            # ----- NEW: Apply KNN imputation if requested and available -----
+            # Store original inputs for later comparison
+            original_inputs = input_values.copy()
+            
+            # Apply KNN imputation if requested and available
+            imputation_method = "pipeline median"
             if use_knn:
                 knn_imp_key = f"knn_imputer_{ds_name_pred}"
                 if knn_imp_key in st.session_state:
                     knn_imputer = st.session_state[knn_imp_key]
                     pred_input_imputed = knn_imputer.transform(pred_input)
                     pred_input = pd.DataFrame(pred_input_imputed, columns=feature_cols)
+                    imputation_method = "KNN (intelligent)"
                 else:
                     st.warning("KNN imputer not available (model may need retraining). Using median imputation (fallback).")
-            # ----------------------------------------------------------------
             
             # Make prediction
             base_pred = float(pipeline.predict(pred_input)[0])
+            
+            # --- NEW: Show imputed feature values ---
+            st.markdown("##### Feature Values Used for Prediction")
+            st.caption(f"Imputation method: **{imputation_method}**")
+            
+            # Create comparison dataframe
+            comparison = []
+            for col in feature_cols:
+                user_val = original_inputs.get(col)
+                imputed_val = pred_input[col].iloc[0]
+                
+                # Format user input for display
+                user_display = ""
+                if user_val is not None and not pd.isna(user_val):
+                    user_display = f"{user_val:,.2f}" if isinstance(user_val, (int, float)) else str(user_val)
+                else:
+                    user_display = "—"
+                
+                # Format imputed value
+                imputed_display = f"{imputed_val:,.2f}" if isinstance(imputed_val, (int, float)) else str(imputed_val)
+                
+                # Determine source
+                source = "User provided" if (user_val is not None and not pd.isna(user_val)) else f"Imputed ({imputation_method})"
+                
+                comparison.append({
+                    "Feature": col,
+                    "Your Input": user_display,
+                    "Value Used": imputed_display,
+                    "Source": source
+                })
+            
+            df_comp = pd.DataFrame(comparison)
+            st.dataframe(df_comp, use_container_width=True, height=min(400, 35 * len(feature_cols)))
+            # --- End new section ---
             
             # Calculate cost breakdown
             owners_cost, sst_cost, contingency_cost, escalation_cost, grand_total = cost_breakdown(
@@ -1076,7 +1116,7 @@ with tab_data:
             
             # Add feature values
             for feature in feature_cols:
-                result[feature] = input_values.get(feature, np.nan)
+                result[feature] = original_inputs.get(feature, np.nan)
             
             # Store prediction
             st.session_state.predictions.setdefault(ds_name_pred, []).append(result)
