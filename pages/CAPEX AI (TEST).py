@@ -889,6 +889,12 @@ with tab_data:
             st.session_state._last_metrics = metrics
             st.session_state[f"trained_model__{ds_name_model}"] = metrics
             
+            # ----- NEW: Fit and store KNN imputer on the full feature set X -----
+            knn_imputer = KNNImputer(n_neighbors=5)
+            knn_imputer.fit(X)
+            st.session_state[f"knn_imputer_{ds_name_model}"] = knn_imputer
+            # --------------------------------------------------------------------
+            
             toast("Training complete!")
             
             # Display metrics
@@ -975,16 +981,14 @@ with tab_data:
     target_col = df_pred.columns[-1]
     currency_pred = get_currency_symbol(df_pred, target_col)
     
-    # SIMPLIFIED: Remove WBS Level 1 inputs, keep only SST and other cost factors
+    # Cost factors
     st.markdown('<h4 style="margin:0;color:#000;">Cost Factors</h4><p>Adjust cost percentages</p>', unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
     with c1:
-        st.markdown("**Cost Factors (use +/-)**")
         sst_pct = st.number_input("SST (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_sst")
         owners_pct = st.number_input("Owner's Cost (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_owner")
     with c2:
-        st.markdown("**Contingency & Escalation**")
         cont_pct = st.number_input("Contingency (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_cont")
         esc_pct = st.number_input("Escalation & Inflation (%)", min_value=0.0, max_value=100.0, value=0.0, step=0.5, key="pred_esc")
     
@@ -1007,13 +1011,10 @@ with tab_data:
         
         for j, feature in enumerate(row_features):
             with cols[j]:
-                # Get current value if exists
-                default_val = st.session_state.get(f"input_{feature}", "")
-                
                 # Create input with better labeling
                 value = st.text_input(
                     label=feature,
-                    value=default_val,
+                    value="",
                     key=f"input_{feature}_{ds_name_pred}",
                     help=f"Enter value for {feature}"
                 )
@@ -1027,16 +1028,36 @@ with tab_data:
                     except:
                         input_values[feature] = np.nan
     
+    # ----- NEW: Checkbox for KNN imputation -----
+    use_knn = st.checkbox(
+        "🔮 Use intelligent imputation for missing features (KNN)",
+        value=False,
+        key=f"use_knn_{ds_name_pred}",
+        help="When enabled, missing feature values are estimated from similar rows in the training data using the features you provide."
+    )
+    # ---------------------------------------------
+    
     # Prediction button
     if st.button("Run Prediction", key="run_pred_btn", type="primary"):
         try:
             # Prepare input data
             pred_input = ModelPipeline.prepare_prediction_input(feature_cols, input_values)
             
+            # ----- NEW: Apply KNN imputation if requested and available -----
+            if use_knn:
+                knn_imp_key = f"knn_imputer_{ds_name_pred}"
+                if knn_imp_key in st.session_state:
+                    knn_imputer = st.session_state[knn_imp_key]
+                    pred_input_imputed = knn_imputer.transform(pred_input)
+                    pred_input = pd.DataFrame(pred_input_imputed, columns=feature_cols)
+                else:
+                    st.warning("KNN imputer not available (model may need retraining). Using median imputation (fallback).")
+            # ----------------------------------------------------------------
+            
             # Make prediction
             base_pred = float(pipeline.predict(pred_input)[0])
             
-            # Calculate cost breakdown (SIMPLIFIED - no EPRR)
+            # Calculate cost breakdown
             owners_cost, sst_cost, contingency_cost, escalation_cost, grand_total = cost_breakdown(
                 base_pred, sst_pct, owners_pct, cont_pct, esc_pct
             )
@@ -1076,10 +1097,6 @@ with tab_data:
             with res_cols[4]:
                 st.metric("Grand Total", f"{currency_pred} {grand_total:,.2f}")
             
-            # Store input values for next prediction
-            for feature, value in input_values.items():
-                st.session_state[f"input_{feature}"] = str(value) if not np.isnan(value) else ""
-            
         except Exception as e:
             st.error(f"Prediction failed: {str(e)}")
     
@@ -1111,16 +1128,12 @@ with tab_data:
                     
                     # Process each row
                     for i, (idx, row) in enumerate(batch_df.iterrows()):
-                        # Get project name
                         project_name_batch = row.get("Project Name", f"Project {i+1}")
-                        
-                        # Calculate cost breakdown
                         base_pred_batch = float(predictions[i])
                         owners_cost_batch, sst_cost_batch, contingency_cost_batch, escalation_cost_batch, grand_total_batch = cost_breakdown(
                             base_pred_batch, sst_pct, owners_pct, cont_pct, esc_pct
                         )
                         
-                        # Create result
                         result_batch = {
                             "Project Name": str(project_name_batch),
                             "Base CAPEX": round(base_pred_batch, 2),
@@ -1132,11 +1145,9 @@ with tab_data:
                             "Target": round(base_pred_batch, 2)
                         }
                         
-                        # Add feature values
                         for feature in feature_cols:
                             result_batch[feature] = row.get(feature, np.nan)
                         
-                        # Store
                         st.session_state.predictions.setdefault(ds_name_pred, []).append(result_batch)
                     
                     st.session_state.processed_excel_files.add(file_id)
@@ -1155,32 +1166,22 @@ with tab_data:
     preds = st.session_state.predictions.get(ds_name_res, [])
     
     if preds:
-        # Display predictions
         df_preds = pd.DataFrame(preds)
-        
-        # Format numeric columns
         display_cols = ["Project Name", "Base CAPEX", "Owner's Cost", "SST Cost", 
                        "Contingency", "Escalation", "Grand Total"]
-        
         df_display = df_preds[display_cols].copy()
         
-        # Format numbers
-        for col in display_cols[1:]:  # Skip Project Name
+        for col in display_cols[1:]:
             df_display[col] = df_display[col].apply(lambda x: f"{x:,.2f}" if not pd.isna(x) else "")
         
         st.dataframe(df_display, use_container_width=True, height=300)
         
-        # Export options
         st.markdown("##### Export Results")
-        
         col1, col2 = st.columns(2)
-        
         with col1:
-            # Excel export
             bio_xlsx = io.BytesIO()
             df_preds.to_excel(bio_xlsx, index=False, engine="openpyxl")
             bio_xlsx.seek(0)
-            
             st.download_button(
                 "⬇️ Download Excel",
                 data=bio_xlsx,
@@ -1188,9 +1189,7 @@ with tab_data:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 key="download_excel_btn"
             )
-        
         with col2:
-            # CSV export
             csv_data = df_preds.to_csv(index=False)
             st.download_button(
                 "⬇️ Download CSV",
@@ -1200,7 +1199,6 @@ with tab_data:
                 key="download_csv_btn"
             )
         
-        # Clear button
         if st.button("🗑️ Clear all predictions", key="clear_predictions_btn"):
             st.session_state.predictions[ds_name_res] = []
             st.rerun()
