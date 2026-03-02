@@ -1688,7 +1688,7 @@ with tab_data:
                     st.error(traceback.format_exc())
 
     # -------------------------------------------------------------------------
-    # FLOATER PREDICTION UI - UPDATED WITH REQUESTED CHANGES
+    # FLOATER PREDICTION UI - UPDATED WITH DEBUGGING
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Floater Cost Prediction</h4><p>Step 3: Enter parameters for prediction</p>', unsafe_allow_html=True)
@@ -1792,8 +1792,6 @@ with tab_data:
                     key="pred_mooring_handling"
                 )
                 
-                # (Vessel Class removed)
-                
             with col2:
                 # Reimbursable markup
                 markup = st.number_input(
@@ -1815,11 +1813,6 @@ with tab_data:
                     key="pred_pipeline_riser"
                 )
                 
-                # (Tank cleaning dropdown removed – now handled outside form)
-                # (Topside cleaning dropdown removed – same as cleaning)
-                
-                # (Tank capacity already outside form, will be used later)
-                
                 # Number of subsystem
                 subsystem = st.number_input(
                     "Number of subsystem",
@@ -1837,7 +1830,7 @@ with tab_data:
                 try:
                     # Build input dictionary with correct data types
                     input_dict = {}
-                    
+
                     # Add categorical columns
                     for col in categorical_cols:
                         if col == 'UnitType':
@@ -1847,12 +1840,9 @@ with tab_data:
                         elif col == 'MooringHandling':
                             input_dict[col] = mooring_handling
                         elif col == 'TankCleaning':
-                            # Use the combined cleaning value
                             input_dict[col] = cleaning_required
                         elif col == 'VesselClass':
-                            # Vessel class is inferred from tank capacity; we can compute it here if needed.
-                            # The model expects a categorical value; we can map tank capacity to class.
-                            # For simplicity, we'll derive it from tank_capacity.
+                            # Derive vessel class from tank capacity
                             if tank_capacity <= 400000:
                                 vessel_class = "Panamax"
                             elif tank_capacity <= 600000:
@@ -1863,12 +1853,10 @@ with tab_data:
                                 vessel_class = "VLCC"
                             input_dict[col] = vessel_class
                         elif col == 'TopsideIsolationCleaning':
-                            # Same as tank cleaning
                             input_dict[col] = cleaning_required
                         else:
-                            # Default for any other categorical columns
                             input_dict[col] = "Unknown"
-                    
+
                     # Add numerical columns
                     for col in numerical_cols:
                         if col == 'NoMooringChainAnchor':
@@ -1880,21 +1868,37 @@ with tab_data:
                         elif col == 'NoPipelineRiser':
                             input_dict[col] = float(pipeline_riser)
                         elif col == 'TankCapacity_bbl':
-                            input_dict[col] = float(tank_capacity)  # may be 0 if cleaning not required
+                            input_dict[col] = float(tank_capacity)
                         elif col == 'Number of subsystem':
                             input_dict[col] = float(subsystem)
                         else:
                             input_dict[col] = 0.0
-                    
+
                     # Create DataFrame with the exact columns the model expects
                     input_df = pd.DataFrame([input_dict])
-                    
-                    # Ensure column order matches training data
                     input_df = input_df[expected_columns]
-                    
+
+                    # ---- DEBUG: Show input DataFrame ----
+                    with st.expander("🔍 Debug: Input to model", expanded=True):
+                        st.write("**Input DataFrame**")
+                        st.dataframe(input_df)
+                        st.write("**Data types:**")
+                        st.write(input_df.dtypes)
+
                     # Make prediction
                     prediction = model_pipeline.predict(input_df)[0]
-                    
+
+                    # ---- DEBUG: Show transformed features ----
+                    with st.expander("🔍 Debug: Transformed features"):
+                        preprocessor = model_pipeline.named_steps['preprocessor']
+                        X_trans = preprocessor.transform(input_df)
+                        try:
+                            X_trans_df = pd.DataFrame(X_trans.toarray())
+                        except:
+                            X_trans_df = pd.DataFrame(X_trans)
+                        st.dataframe(X_trans_df)
+                        st.write(f"**Prediction:** RM {prediction:,.2f}")
+
                     # Store prediction with user-friendly column names
                     prediction_record = {
                         'Unit Type': unit_type,
@@ -1912,45 +1916,29 @@ with tab_data:
                         'Predicted Cost (RM)': float(prediction),
                         'Timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
                     }
-                    
+
                     st.session_state.floater_predictions.append(prediction_record)
-                    
+
                     # Display results
                     st.success(f"✅ Cost Prediction Complete!")
-                    
+
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric(
-                            "Base Cost",
-                            f"RM {prediction:,.2f}"
-                        )
-                    
+                        st.metric("Base Cost", f"RM {prediction:,.2f}")
                     with col2:
-                        # Calculate with markup
                         markup_amount = prediction * (markup / 100)
-                        st.metric(
-                            "Markup Amount",
-                            f"RM {markup_amount:,.2f}",
-                            delta=f"{markup}%"
-                        )
-                    
+                        st.metric("Markup Amount", f"RM {markup_amount:,.2f}", delta=f"{markup}%")
                     with col3:
                         total_with_markup = prediction + markup_amount
-                        st.metric(
-                            "Total Cost (with markup)",
-                            f"RM {total_with_markup:,.2f}"
-                        )
-                    
-                    # Show input summary
+                        st.metric("Total Cost (with markup)", f"RM {total_with_markup:,.2f}")
+
                     with st.expander("📋 Input Summary", expanded=False):
                         summary_df = pd.DataFrame([prediction_record])
-                        # Drop timestamp for cleaner display
                         display_cols = [c for c in summary_df.columns if c != 'Timestamp']
                         st.dataframe(summary_df[display_cols], use_container_width=True)
-                    
-                    # Show confidence interval
+
                     st.info(f"📊 Model confidence: R² = {metrics['r2']:.3f}, Typical error range: ±RM {metrics['rmse']:,.2f}")
-                    
+
                 except Exception as e:
                     st.error(f"Error making prediction: {e}")
                     import traceback
@@ -2005,9 +1993,6 @@ with tab_data:
 
         # --- Template download button ---
         if st.button("📥 Download Batch Template", key="floater_template_btn"):
-            # Note: Template now reflects combined cleaning and no vessel class column.
-            # The user should still include both TankCleaning and TopsideIsolationCleaning columns (same value).
-            # VesselClass can be omitted; it will be derived from TankCapacity during batch processing.
             template_data = {
                 'UnitType': ['FPSO'],
                 'Location': ['PM'],
@@ -2017,7 +2002,7 @@ with tab_data:
                 'ReimbursableMarkup': [0.0],
                 'NoPipelineRiser': [4],
                 'TankCleaning': ['Not required'],
-                'TankCapacity_bbl': [0],  # 0 when not required
+                'TankCapacity_bbl': [0],
                 'TopsideIsolationCleaning': ['Not required'],
                 'Number of subsystem': [5],
             }
@@ -2110,7 +2095,6 @@ with tab_data:
                                                 # map common boolean representations
                                                 v_low = v.lower()
                                                 if v_low in ['1', 'true', 'yes']:
-                                                    # pick the one that likely means "required" (not containing "not")
                                                     for k in known:
                                                         if 'not' not in k.lower():
                                                             return k
@@ -2118,7 +2102,6 @@ with tab_data:
                                                     for k in known:
                                                         if 'not' in k.lower():
                                                             return k
-                                                # fallback
                                                 return known[0]
                                             
                                             mapped_val = map_to_known(val, known_values)
@@ -2132,9 +2115,7 @@ with tab_data:
                                         if pd.isna(raw_val) or raw_val is None:
                                             input_dict[col] = 0.0
                                         else:
-                                            # Remove commas, percent signs, and convert
                                             try:
-                                                # Handle strings like "1,000" or "10%"
                                                 cleaned = str(raw_val).replace(',', '').replace('%', '').strip()
                                                 input_dict[col] = float(cleaned)
                                             except:
