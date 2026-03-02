@@ -37,6 +37,7 @@ from pptx.dml.color import RGBColor
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation   # <-- NEW IMPORT
 
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
@@ -1443,6 +1444,14 @@ with tab_data:
                             'Feature': feature_names[:len(importances)],
                             'Importance': importances
                         }).sort_values('Importance', ascending=False).head(15)
+
+                    # --- NEW: Store unique values for categorical columns ---
+                    categorical_unique_values = {}
+                    for col in categorical_cols:
+                        # Use the processed dataframe (df_processed) which has no missing values
+                        unique_vals = df_processed[col].dropna().unique().tolist()
+                        categorical_unique_values[col] = unique_vals
+                    # --- END NEW ---
                     
                     # Store model and metrics - MAKE SURE TO INCLUDE COLUMN TYPES
                     st.session_state.floater_model = {
@@ -1455,7 +1464,9 @@ with tab_data:
                             'categorical_cols': categorical_cols,
                             'numerical_cols': numerical_cols,
                             'feature_importance': feature_importance
-                        }
+                        },
+                        'categorical_unique_values': categorical_unique_values,   # <-- NEW
+                        'feature_columns': X.columns.tolist()                     # <-- store for later use
                     }
                     
                     # Show results
@@ -1818,7 +1829,65 @@ with tab_data:
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Batch Prediction</h4><p>Upload Excel for multiple predictions</p>', unsafe_allow_html=True)
-        
+
+        # --- NEW: Template download button ---
+        if st.button("📥 Download Batch Template", key="floater_template_btn"):
+            # Build a template DataFrame with one example row
+            template_data = {
+                'UnitType': ['FPSO'],
+                'Location': ['PM'],
+                'NoMooringChainAnchor': [8],
+                'NoMidWaterArch': [2],
+                'MooringHandling': ['Cut anchor pile and retrieve chain only'],
+                'ReimbursableMarkup': [0.0],
+                'NoPipelineRiser': [4],
+                'TankCleaning': ['Not required'],
+                'TankCapacity_bbl': [400000],
+                'VesselClass': ['VLCC'],
+                'TopsideIsolationCleaning': ['Not required'],
+                'Number of subsystem': [5],
+            }
+            template_df = pd.DataFrame(template_data)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Template')
+                # Optional: Add data validation dropdowns for categorical columns
+                workbook = writer.book
+                worksheet = writer.sheets['Template']
+                
+                # Define data validation for each categorical column
+                cat_options = {
+                    'UnitType': ['FPSO', 'FSO'],
+                    'Location': ['PM', 'SB', 'SK'],
+                    'MooringHandling': [
+                        'Cut anchor pile and retrieve chain only',
+                        'Mooring Chain and anchor pile leave in situ',
+                        'Mooring Chain and drag anchor retrieve/release'
+                    ],
+                    'TankCleaning': ['Required', 'Not required'],
+                    'VesselClass': ['Panamax', 'Aframax', 'Suezmax', 'VLCC'],
+                    'TopsideIsolationCleaning': ['Required', 'Not required']
+                }
+                # Map columns to Excel columns (A=1, B=2, ...)
+                col_mapping = {name: idx+1 for idx, name in enumerate(template_df.columns)}
+                for col_name, options in cat_options.items():
+                    if col_name in col_mapping:
+                        col_letter = get_column_letter(col_mapping[col_name])
+                        dv = DataValidation(type="list", formula1=f'"{",".join(options)}"')
+                        worksheet.add_data_validation(dv)
+                        dv.add(f'{col_letter}2:{col_letter}1048576')   # apply to all rows below header
+            output.seek(0)
+            
+            st.download_button(
+                "⬇️ Download Excel Template",
+                data=output,
+                file_name="floater_prediction_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="floater_template_download"
+            )
+        # --- END NEW ---
+
         # Get model info
         model_data = st.session_state.floater_model
         model_pipeline = model_data['pipeline']
@@ -1851,30 +1920,47 @@ with tab_data:
                     if st.button("🔢 Run Batch Prediction", key="run_batch_floater"):
                         with st.spinner("Processing batch prediction..."):
                             try:
-                                # Process each row exactly like single prediction
+                                # Retrieve stored unique values (if any)
+                                cat_unique = model_data.get('categorical_unique_values', {})
+
                                 processed_rows = []
-                                
                                 for idx, row in batch_df.iterrows():
-                                    # Build input dictionary with correct data types
                                     input_dict = {}
                                     
-                                    # Add categorical columns as strings
+                                    # ---- Categorical columns ----
                                     for col in categorical_cols:
-                                        val = row[col]
-                                        if pd.isna(val) or val is None:
+                                        raw_val = row[col]
+                                        if pd.isna(raw_val) or raw_val is None:
                                             input_dict[col] = "Unknown"
                                         else:
-                                            input_dict[col] = str(val).strip()
+                                            val = str(raw_val).strip()
+                                            known_values = cat_unique.get(col, [])
+                                            if known_values:
+                                                # Case‑insensitive match
+                                                matched = next((k for k in known_values if k.lower() == val.lower()), None)
+                                                if matched:
+                                                    if matched != val:
+                                                        st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' corrected to '{matched}'.")
+                                                    input_dict[col] = matched
+                                                else:
+                                                    # Fallback to first known category
+                                                    fallback = known_values[0]
+                                                    st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' not recognised. Using '{fallback}'.")
+                                                    input_dict[col] = fallback
+                                            else:
+                                                # No known values (should not happen) – keep as is
+                                                input_dict[col] = val
                                     
-                                    # Add numerical columns as floats
+                                    # ---- Numerical columns ----
                                     for col in numerical_cols:
-                                        val = row[col]
-                                        if pd.isna(val) or val is None:
+                                        raw_val = row[col]
+                                        if pd.isna(raw_val) or raw_val is None:
                                             input_dict[col] = 0.0
                                         else:
                                             try:
-                                                input_dict[col] = float(val)
+                                                input_dict[col] = float(raw_val)
                                             except:
+                                                st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' is not numeric. Using 0.")
                                                 input_dict[col] = 0.0
                                     
                                     processed_rows.append(input_dict)
@@ -1884,10 +1970,12 @@ with tab_data:
                                 
                                 # Ensure column order matches training data
                                 processed_df = processed_df[expected_columns]
-                                
-                                # Debug info - show data types
-                                st.write("Debug - Processed Data Types:")
-                                st.write(processed_df.dtypes)
+
+                                # --- NEW: Force numerical columns to float ---
+                                for col in numerical_cols:
+                                    if col in processed_df.columns:
+                                        processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce').fillna(0.0)
+                                # --- END NEW ---
                                 
                                 # Make predictions
                                 predictions = model_pipeline.predict(processed_df)
@@ -1898,8 +1986,7 @@ with tab_data:
                                 # Calculate with markup if markup column exists
                                 if 'ReimbursableMarkup' in batch_df.columns:
                                     batch_df['Total with Markup (RM)'] = batch_df.apply(
-                                        lambda row: row['Predicted Cost (RM)'] + 
-                                                   (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
+                                        lambda row: row['Predicted Cost (RM)'] * (1 + row['ReimbursableMarkup']/100),
                                         axis=1
                                     )
                                 
