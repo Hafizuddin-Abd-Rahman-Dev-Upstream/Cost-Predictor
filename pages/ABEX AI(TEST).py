@@ -37,7 +37,6 @@ from pptx.dml.color import RGBColor
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
-from openpyxl.worksheet.datavalidation import DataValidation
 
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
@@ -1012,29 +1011,10 @@ with tab_data:
         ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
         df_model = st.session_state.datasets[ds_name_model]
 
-        with st.spinner("Preparing data..."):
-            # Separate numerical and categorical columns
-            num_cols = df_model.select_dtypes(include=np.number).columns.tolist()
-            cat_cols = df_model.select_dtypes(include='object').columns.tolist()
-            
-            if num_cols:
-                # Impute numerical columns with KNNImputer
-                imputer_num = KNNImputer(n_neighbors=5)
-                imputed_num = imputer_num.fit_transform(df_model[num_cols])
-                df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols, index=df_model.index)
-            else:
-                df_imputed_num = pd.DataFrame()
-            
-            # For categorical columns, we keep them as is (or you could fill with mode)
-            df_cat = df_model[cat_cols] if cat_cols else pd.DataFrame()
-            
-            # Combine back, preserving original order
-            df_imputed = pd.concat([df_imputed_num, df_cat], axis=1)
-            # Reorder columns to match original
-            df_imputed = df_imputed[df_model.columns]
-            
-            X_model = df_imputed.iloc[:, :-1]
-            y_model = df_imputed.iloc[:, -1]
+        with st.spinner("Imputing & preparing..."):
+            imputed_model = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_model), columns=df_model.columns)
+            X_model = imputed_model.iloc[:, :-1]
+            y_model = imputed_model.iloc[:, -1]
 
         st.markdown('<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>', unsafe_allow_html=True)
         m1, m2 = st.columns([1, 3])
@@ -1083,78 +1063,52 @@ with tab_data:
     else:
         ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
         df_viz = st.session_state.datasets[ds_name_viz]
-        
-        # Prepare data: impute numerical only, keep categorical
-        num_cols_viz = df_viz.select_dtypes(include=np.number).columns.tolist()
-        cat_cols_viz = df_viz.select_dtypes(include='object').columns.tolist()
-        
-        if num_cols_viz:
-            imputer_num = KNNImputer(n_neighbors=5)
-            imputed_num = imputer_num.fit_transform(df_viz[num_cols_viz])
-            df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_viz, index=df_viz.index)
-        else:
-            df_imputed_num = pd.DataFrame()
-        
-        df_cat_viz = df_viz[cat_cols_viz] if cat_cols_viz else pd.DataFrame()
-        df_imputed_viz = pd.concat([df_imputed_num, df_cat_viz], axis=1)
-        df_imputed_viz = df_imputed_viz[df_viz.columns]
-        
-        X_viz = df_imputed_viz.iloc[:, :-1]
-        y_viz = df_imputed_viz.iloc[:, -1]
+        imputed_viz = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_viz), columns=df_viz.columns)
+        X_viz = imputed_viz.iloc[:, :-1]
+        y_viz = imputed_viz.iloc[:, -1]
         target_column_viz = y_viz.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
-        # Correlation only on numeric columns
-        corr = df_imputed_viz.select_dtypes(include=np.number).corr()
+        corr = imputed_viz.corr(numeric_only=True)
         fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
         fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_corr, use_container_width=True)
 
         st.markdown('<h4 style="margin:0;color:#000;">Feature Importance</h4><p>Model</p>', unsafe_allow_html=True)
-        # Use only numeric features for importance (or handle categorical separately)
-        X_numeric_viz = X_viz.select_dtypes(include=np.number)
-        if X_numeric_viz.shape[1] == 0:
-            st.warning("No numeric features available for importance plot.")
-        else:
-            scaler_viz = MinMaxScaler().fit(X_numeric_viz)
-            model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_numeric_viz), y_viz)
-            importances = model_viz.feature_importances_
-            fi = pd.DataFrame({"feature": X_numeric_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
-            fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
-            fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig_fi, use_container_width=True)
+        scaler_viz = MinMaxScaler().fit(X_viz)
+        model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_viz), y_viz)
+        importances = model_viz.feature_importances_
+        fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
+        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
+        fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_fi, use_container_width=True)
 
         st.markdown('<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>', unsafe_allow_html=True)
-        # Only numeric features can be used for cost curve
-        numeric_feats = X_viz.select_dtypes(include=np.number).columns.tolist()
-        if numeric_feats:
-            feat = st.selectbox("Select feature for cost curve", numeric_feats)
-            x_vals = df_imputed_viz[feat].values
-            y_vals = y_viz.values
-            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-            scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
-            fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
+        feat = st.selectbox("Select feature for cost curve", X_viz.columns)
+        x_vals = imputed_viz[feat].values
+        y_vals = y_viz.values
+        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+        scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
+        fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
 
-            if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
-                xv = scatter_df[feat].to_numpy(dtype=float)
-                yv = scatter_df[target_column_viz].to_numpy(dtype=float)
-                slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
-                x_line = np.linspace(xv.min(), xv.max(), 100)
-                y_line = slope * x_line + intercept
-                fig_cc.add_trace(
-                    go.Scatter(
-                        x=x_line,
-                        y=y_line,
-                        mode="lines",
-                        name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
-                    )
+        if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
+            xv = scatter_df[feat].to_numpy(dtype=float)
+            yv = scatter_df[target_column_viz].to_numpy(dtype=float)
+            slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
+            x_line = np.linspace(xv.min(), xv.max(), 100)
+            y_line = slope * x_line + intercept
+            fig_cc.add_trace(
+                go.Scatter(
+                    x=x_line,
+                    y=y_line,
+                    mode="lines",
+                    name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
                 )
-            else:
-                st.warning("Not enough valid/variable data to compute regression.")
-            fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-            st.plotly_chart(fig_cc, use_container_width=True)
+            )
         else:
-            st.warning("No numeric features available for cost curve.")
+            st.warning("Not enough valid/variable data to compute regression.")
+        fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+        st.plotly_chart(fig_cc, use_container_width=True)
 
     # ========================= PREDICT =======================================
     st.divider()
@@ -1167,23 +1121,8 @@ with tab_data:
         df_pred = st.session_state.datasets[ds_name_pred]
         currency_pred = get_currency_symbol(df_pred)
 
-        # Prepare data: impute numerical only, keep categorical
-        num_cols_pred = df_pred.select_dtypes(include=np.number).columns.tolist()
-        cat_cols_pred = df_pred.select_dtypes(include='object').columns.tolist()
-        
-        if num_cols_pred:
-            imputer_num = KNNImputer(n_neighbors=5)
-            imputed_num = imputer_num.fit_transform(df_pred[num_cols_pred])
-            df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_pred, index=df_pred.index)
-        else:
-            df_imputed_num = pd.DataFrame()
-        
-        df_cat_pred = df_pred[cat_cols_pred] if cat_cols_pred else pd.DataFrame()
-        df_imputed_pred = pd.concat([df_imputed_num, df_cat_pred], axis=1)
-        df_imputed_pred = df_imputed_pred[df_pred.columns]
-        
-        X_pred = df_imputed_pred.iloc[:, :-1]
-        y_pred = df_imputed_pred.iloc[:, -1]
+        imputed_pred = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_pred), columns=df_pred.columns)
+        X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
         target_column_pred = y_pred.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
@@ -1504,15 +1443,8 @@ with tab_data:
                             'Feature': feature_names[:len(importances)],
                             'Importance': importances
                         }).sort_values('Importance', ascending=False).head(15)
-
-                    # Store unique values for categorical columns
-                    categorical_unique_values = {}
-                    for col in categorical_cols:
-                        # Use the processed dataframe (df_processed) which has no missing values
-                        unique_vals = df_processed[col].dropna().unique().tolist()
-                        categorical_unique_values[col] = unique_vals
                     
-                    # Store model and metrics
+                    # Store model and metrics - MAKE SURE TO INCLUDE COLUMN TYPES
                     st.session_state.floater_model = {
                         'pipeline': model_pipeline,
                         'metrics': {
@@ -1523,9 +1455,7 @@ with tab_data:
                             'categorical_cols': categorical_cols,
                             'numerical_cols': numerical_cols,
                             'feature_importance': feature_importance
-                        },
-                        'categorical_unique_values': categorical_unique_values,
-                        'feature_columns': X.columns.tolist()
+                        }
                     }
                     
                     # Show results
@@ -1888,58 +1818,7 @@ with tab_data:
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Batch Prediction</h4><p>Upload Excel for multiple predictions</p>', unsafe_allow_html=True)
-
-        # --- Template download button ---
-        if st.button("📥 Download Batch Template", key="floater_template_btn"):
-            template_data = {
-                'UnitType': ['FPSO'],
-                'Location': ['PM'],
-                'NoMooringChainAnchor': [8],
-                'NoMidWaterArch': [2],
-                'MooringHandling': ['Cut anchor pile and retrieve chain only'],
-                'ReimbursableMarkup': [0.0],
-                'NoPipelineRiser': [4],
-                'TankCleaning': ['Not required'],
-                'TankCapacity_bbl': [400000],
-                'VesselClass': ['VLCC'],
-                'TopsideIsolationCleaning': ['Not required'],
-                'Number of subsystem': [5],
-            }
-            template_df = pd.DataFrame(template_data)
-            
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                template_df.to_excel(writer, index=False, sheet_name='Template')
-                workbook = writer.book
-                worksheet = writer.sheets['Template']
-                cat_options = {
-                    'UnitType': ['FPSO', 'FSO'],
-                    'Location': ['PM', 'SB', 'SK'],
-                    'MooringHandling': [
-                        'Cut anchor pile and retrieve chain only',
-                        'Mooring Chain and anchor pile leave in situ',
-                        'Mooring Chain and drag anchor retrieve/release'
-                    ],
-                    'TankCleaning': ['Required', 'Not required'],
-                    'VesselClass': ['Panamax', 'Aframax', 'Suezmax', 'VLCC'],
-                    'TopsideIsolationCleaning': ['Required', 'Not required']
-                }
-                col_mapping = {name: idx+1 for idx, name in enumerate(template_df.columns)}
-                for col_name, options in cat_options.items():
-                    if col_name in col_mapping:
-                        col_letter = get_column_letter(col_mapping[col_name])
-                        dv = DataValidation(type="list", formula1=f'"{",".join(options)}"')
-                        worksheet.add_data_validation(dv)
-                        dv.add(f'{col_letter}2:{col_letter}1048576')
-            output.seek(0)
-            st.download_button(
-                "⬇️ Download Excel Template",
-                data=output,
-                file_name="floater_prediction_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="floater_template_download"
-            )
-
+        
         # Get model info
         model_data = st.session_state.floater_model
         model_pipeline = model_data['pipeline']
@@ -1947,21 +1826,24 @@ with tab_data:
         expected_columns = st.session_state.floater_feature_columns
         categorical_cols = metrics['categorical_cols']
         numerical_cols = metrics['numerical_cols']
-        cat_unique = model_data.get('categorical_unique_values', {})
-
+        
         batch_file = st.file_uploader(
             "Upload Excel file for batch prediction",
             type=["xlsx", "xls"],
             key="floater_batch_file"
         )
-
+        
         if batch_file is not None:
             try:
+                # Read Excel file
                 batch_df = pd.read_excel(batch_file)
+                
                 st.write("📊 Uploaded Data Preview:")
                 st.dataframe(batch_df.head())
-
+                
+                # Check required columns
                 missing_cols = [col for col in expected_columns if col not in batch_df.columns]
+                
                 if missing_cols:
                     st.error(f"Missing required columns: {', '.join(missing_cols)}")
                     st.info(f"Expected columns: {', '.join(expected_columns)}")
@@ -1969,91 +1851,61 @@ with tab_data:
                     if st.button("🔢 Run Batch Prediction", key="run_batch_floater"):
                         with st.spinner("Processing batch prediction..."):
                             try:
+                                # Process each row exactly like single prediction
                                 processed_rows = []
+                                
                                 for idx, row in batch_df.iterrows():
+                                    # Build input dictionary with correct data types
                                     input_dict = {}
-
-                                    # ---- Categorical columns ----
+                                    
+                                    # Add categorical columns as strings
                                     for col in categorical_cols:
-                                        raw_val = row[col]
-                                        if pd.isna(raw_val) or raw_val is None:
+                                        val = row[col]
+                                        if pd.isna(val) or val is None:
                                             input_dict[col] = "Unknown"
                                         else:
-                                            val = str(raw_val).strip()
-                                            known_values = cat_unique.get(col, [])
-                                            
-                                            # Define mapping function for boolean-like values
-                                            def map_to_known(v, known):
-                                                if not known:
-                                                    return v
-                                                if v in known:
-                                                    return v
-                                                # case-insensitive
-                                                for k in known:
-                                                    if k.lower() == v.lower():
-                                                        return k
-                                                # map common boolean representations
-                                                v_low = v.lower()
-                                                if v_low in ['1', 'true', 'yes']:
-                                                    # pick the one that likely means "required" (not containing "not")
-                                                    for k in known:
-                                                        if 'not' not in k.lower():
-                                                            return k
-                                                if v_low in ['0', 'false', 'no']:
-                                                    for k in known:
-                                                        if 'not' in k.lower():
-                                                            return k
-                                                # fallback
-                                                return known[0]
-                                            
-                                            mapped_val = map_to_known(val, known_values)
-                                            if mapped_val != val:
-                                                st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' mapped to '{mapped_val}'.")
-                                            input_dict[col] = mapped_val
-
-                                    # ---- Numerical columns ----
+                                            input_dict[col] = str(val).strip()
+                                    
+                                    # Add numerical columns as floats
                                     for col in numerical_cols:
-                                        raw_val = row[col]
-                                        if pd.isna(raw_val) or raw_val is None:
+                                        val = row[col]
+                                        if pd.isna(val) or val is None:
                                             input_dict[col] = 0.0
                                         else:
-                                            # Remove commas, percent signs, and convert
                                             try:
-                                                # Handle strings like "1,000" or "10%"
-                                                cleaned = str(raw_val).replace(',', '').replace('%', '').strip()
-                                                input_dict[col] = float(cleaned)
+                                                input_dict[col] = float(val)
                                             except:
-                                                st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' could not be parsed as number. Using 0.")
                                                 input_dict[col] = 0.0
-
+                                    
                                     processed_rows.append(input_dict)
-
-                                # Create DataFrame with correct column order
+                                
+                                # Create DataFrame with correct dtypes
                                 processed_df = pd.DataFrame(processed_rows)
+                                
+                                # Ensure column order matches training data
                                 processed_df = processed_df[expected_columns]
-
-                                # Force numerical columns to float (safety)
-                                for col in numerical_cols:
-                                    if col in processed_df.columns:
-                                        processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce').fillna(0.0)
-
-                                # --- DEBUG: Show processed data (optional) ---
-                                with st.expander("Debug: Processed DataFrame (first 5 rows)"):
-                                    st.dataframe(processed_df.head())
-                                    st.write("Data types:", processed_df.dtypes)
-
+                                
+                                # Debug info - show data types
+                                st.write("Debug - Processed Data Types:")
+                                st.write(processed_df.dtypes)
+                                
                                 # Make predictions
                                 predictions = model_pipeline.predict(processed_df)
-
+                                
                                 # Add predictions to original dataframe
                                 batch_df['Predicted Cost (RM)'] = predictions
+                                
+                                # Calculate with markup if markup column exists
                                 if 'ReimbursableMarkup' in batch_df.columns:
                                     batch_df['Total with Markup (RM)'] = batch_df.apply(
-                                        lambda row: row['Predicted Cost (RM)'] * (1 + row['ReimbursableMarkup']/100),
+                                        lambda row: row['Predicted Cost (RM)'] + 
+                                                   (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
                                         axis=1
                                     )
-
+                                
+                                # Display results with statistics
                                 st.success(f"✅ Batch prediction complete! Processed {len(batch_df)} records.")
+                                
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
                                     st.metric("Min Prediction", f"RM {predictions.min():,.2f}")
@@ -2061,32 +1913,33 @@ with tab_data:
                                     st.metric("Max Prediction", f"RM {predictions.max():,.2f}")
                                 with col3:
                                     st.metric("Avg Prediction", f"RM {predictions.mean():,.2f}")
-
+                                
                                 with st.expander("📊 Detailed Results", expanded=True):
                                     st.dataframe(batch_df, use_container_width=True)
-
+                                
                                 # Download button
                                 batch_buffer = io.BytesIO()
                                 with pd.ExcelWriter(batch_buffer, engine='openpyxl') as writer:
                                     batch_df.to_excel(writer, index=False, sheet_name='Batch Predictions')
                                 batch_buffer.seek(0)
+                                
                                 st.download_button(
                                     label="📥 Download Batch Results",
                                     data=batch_buffer,
                                     file_name="floater_batch_predictions.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
-
-                                # Compare with latest single prediction
+                                
+                                # Compare with latest single prediction if available
                                 if st.session_state.floater_predictions:
                                     latest_single = st.session_state.floater_predictions[-1]
                                     st.info(f"Latest single prediction: RM {latest_single['Predicted Cost (RM)']:,.2f}")
-
+                                
                             except Exception as e:
                                 st.error(f"Error during prediction: {e}")
                                 import traceback
                                 st.error(traceback.format_exc())
-
+                            
             except Exception as e:
                 st.error(f"Error processing batch file: {e}")
 
@@ -2134,23 +1987,9 @@ with tab_pb:
             df_comp = st.session_state.datasets[dataset_for_comp]
             currency_ds = get_currency_symbol(df_comp)
 
-            # Prepare data: impute numerical only, keep categorical
-            num_cols_comp = df_comp.select_dtypes(include=np.number).columns.tolist()
-            cat_cols_comp = df_comp.select_dtypes(include='object').columns.tolist()
-            
-            if num_cols_comp:
-                imputer_num = KNNImputer(n_neighbors=5)
-                imputed_num = imputer_num.fit_transform(df_comp[num_cols_comp])
-                df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_comp, index=df_comp.index)
-            else:
-                df_imputed_num = pd.DataFrame()
-            
-            df_cat_comp = df_comp[cat_cols_comp] if cat_cols_comp else pd.DataFrame()
-            df_imputed_comp = pd.concat([df_imputed_num, df_cat_comp], axis=1)
-            df_imputed_comp = df_imputed_comp[df_comp.columns]
-            
-            X_comp = df_imputed_comp.iloc[:, :-1]
-            y_comp = df_imputed_comp.iloc[:, -1]
+            imputed_comp = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_comp), columns=df_comp.columns)
+            X_comp = imputed_comp.iloc[:, :-1]
+            y_comp = imputed_comp.iloc[:, -1]
             target_column_comp = y_comp.name
 
             default_label = st.session_state.component_labels.get(dataset_for_comp, "")
