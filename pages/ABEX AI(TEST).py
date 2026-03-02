@@ -1688,7 +1688,7 @@ with tab_data:
                     st.error(traceback.format_exc())
 
     # -------------------------------------------------------------------------
-    # FLOATER PREDICTION UI
+    # FLOATER PREDICTION UI - UPDATED WITH REQUESTED CHANGES
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Floater Cost Prediction</h4><p>Step 3: Enter parameters for prediction</p>', unsafe_allow_html=True)
@@ -1701,19 +1701,43 @@ with tab_data:
         categorical_cols = metrics['categorical_cols']
         numerical_cols = metrics['numerical_cols']
         
-        # Display expected columns for debugging (optional)
-        with st.expander("📋 Model Expected Columns", expanded=False):
-            st.write("**Categorical Columns:**")
-            for col in categorical_cols:
-                st.write(f"- {col}")
-            st.write("**Numerical Columns:**")
-            for col in numerical_cols:
-                st.write(f"- {col}")
-        
         # Display model info
         st.info(f"✅ Model ready - R² Score: {metrics['r2']:.3f}, RMSE: RM {metrics['rmse']:,.2f}")
         
-        # Create form for prediction inputs
+        # --- New combined cleaning dropdown (outside form for dynamic visibility) ---
+        cleaning_required = st.radio(
+            "Cleaning Required?",
+            options=["Not required", "Required"],
+            index=0,
+            key="cleaning_required",
+            horizontal=True
+        )
+        
+        # --- Conditionally show Tank Capacity if cleaning is required ---
+        tank_capacity = 0.0
+        if cleaning_required == "Required":
+            tank_capacity = st.number_input(
+                "Tank Capacity (bbl)",
+                min_value=0,
+                max_value=1000000,
+                value=400000,
+                step=10000,
+                key="tank_capacity_input",
+                help="Tank capacity in barrels. Required only when cleaning is required."
+            )
+            # Show vessel class hint
+            if tank_capacity > 0:
+                if tank_capacity <= 400000:
+                    detected_class = "Panamax"
+                elif tank_capacity <= 600000:
+                    detected_class = "Aframax"
+                elif tank_capacity <= 1000000:
+                    detected_class = "Suezmax"
+                else:
+                    detected_class = "VLCC"
+                st.caption(f"Detected Vessel Class: {detected_class}")
+        
+        # --- Form for the remaining inputs ---
         with st.form("floater_prediction_form"):
             st.markdown("**Floater Parameters**")
             
@@ -1768,13 +1792,7 @@ with tab_data:
                     key="pred_mooring_handling"
                 )
                 
-                # Vessel Class
-                vessel_class = st.selectbox(
-                    "Vessel Class",
-                    options=["Panamax", "Aframax", "Suezmax", "VLCC"],
-                    index=0,
-                    key="pred_vessel_class"
-                )
+                # (Vessel Class removed)
                 
             with col2:
                 # Reimbursable markup
@@ -1797,43 +1815,10 @@ with tab_data:
                     key="pred_pipeline_riser"
                 )
                 
-                # Tank cleaning
-                tank_cleaning = st.selectbox(
-                    "Tank cleaning",
-                    options=["Required", "Not required"],
-                    index=1,
-                    key="pred_tank_cleaning"
-                )
+                # (Tank cleaning dropdown removed – now handled outside form)
+                # (Topside cleaning dropdown removed – same as cleaning)
                 
-                # Tank Capacity
-                tank_capacity = st.number_input(
-                    "Tank Capacity (bbl)",
-                    min_value=0,
-                    max_value=1000000,
-                    value=400000,
-                    step=10000,
-                    key="pred_tank_capacity"
-                )
-                
-                # Show tank size classification
-                if tank_capacity > 0:
-                    if tank_capacity <= 400000:
-                        detected_class = "Panamax"
-                    elif tank_capacity <= 600000:
-                        detected_class = "Aframax"
-                    elif tank_capacity <= 1000000:
-                        detected_class = "Suezmax"
-                    else:
-                        detected_class = "VLCC"
-                    st.caption(f"Detected Class: {detected_class}")
-                
-                # Isolation, flushing and cleaning of topside
-                topside_cleaning = st.selectbox(
-                    "Isolation, flushing and cleaning of topside",
-                    options=["Required", "Not required"],
-                    index=1,
-                    key="pred_topside_cleaning"
-                )
+                # (Tank capacity already outside form, will be used later)
                 
                 # Number of subsystem
                 subsystem = st.number_input(
@@ -1853,7 +1838,7 @@ with tab_data:
                     # Build input dictionary with correct data types
                     input_dict = {}
                     
-                    # Add categorical columns as strings
+                    # Add categorical columns
                     for col in categorical_cols:
                         if col == 'UnitType':
                             input_dict[col] = unit_type
@@ -1862,16 +1847,29 @@ with tab_data:
                         elif col == 'MooringHandling':
                             input_dict[col] = mooring_handling
                         elif col == 'TankCleaning':
-                            input_dict[col] = tank_cleaning
+                            # Use the combined cleaning value
+                            input_dict[col] = cleaning_required
                         elif col == 'VesselClass':
+                            # Vessel class is inferred from tank capacity; we can compute it here if needed.
+                            # The model expects a categorical value; we can map tank capacity to class.
+                            # For simplicity, we'll derive it from tank_capacity.
+                            if tank_capacity <= 400000:
+                                vessel_class = "Panamax"
+                            elif tank_capacity <= 600000:
+                                vessel_class = "Aframax"
+                            elif tank_capacity <= 1000000:
+                                vessel_class = "Suezmax"
+                            else:
+                                vessel_class = "VLCC"
                             input_dict[col] = vessel_class
                         elif col == 'TopsideIsolationCleaning':
-                            input_dict[col] = topside_cleaning
+                            # Same as tank cleaning
+                            input_dict[col] = cleaning_required
                         else:
                             # Default for any other categorical columns
                             input_dict[col] = "Unknown"
                     
-                    # Add numerical columns as floats
+                    # Add numerical columns
                     for col in numerical_cols:
                         if col == 'NoMooringChainAnchor':
                             input_dict[col] = float(mooring_chain_anchor)
@@ -1882,11 +1880,10 @@ with tab_data:
                         elif col == 'NoPipelineRiser':
                             input_dict[col] = float(pipeline_riser)
                         elif col == 'TankCapacity_bbl':
-                            input_dict[col] = float(tank_capacity)
+                            input_dict[col] = float(tank_capacity)  # may be 0 if cleaning not required
                         elif col == 'Number of subsystem':
                             input_dict[col] = float(subsystem)
                         else:
-                            # Default for any other numerical columns
                             input_dict[col] = 0.0
                     
                     # Create DataFrame with the exact columns the model expects
@@ -1907,10 +1904,10 @@ with tab_data:
                         'Mooring Handling': mooring_handling,
                         'Markup (%)': markup,
                         'Pipeline/Riser': pipeline_riser,
-                        'Tank Cleaning': tank_cleaning,
+                        'Tank Cleaning': cleaning_required,
                         'Tank Capacity (bbl)': tank_capacity,
-                        'Vessel Class': vessel_class,
-                        'Topside Cleaning': topside_cleaning,
+                        'Vessel Class': input_dict.get('VesselClass', 'N/A'),
+                        'Topside Cleaning': cleaning_required,
                         'Subsystems': subsystem,
                         'Predicted Cost (RM)': float(prediction),
                         'Timestamp': pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1969,10 +1966,7 @@ with tab_data:
         history_df = pd.DataFrame(st.session_state.floater_predictions)
         
         # Display in a nice table
-        display_cols = ['Timestamp', 'Unit Type', 'Location', 'Predicted Cost (RM)']
-        if 'Tank Cleaning' in history_df.columns:
-            display_cols.append('Tank Cleaning')
-        
+        display_cols = ['Timestamp', 'Unit Type', 'Location', 'Tank Cleaning', 'Predicted Cost (RM)']
         st.dataframe(
             history_df[display_cols].sort_values('Timestamp', ascending=False),
             use_container_width=True
@@ -2011,6 +2005,9 @@ with tab_data:
 
         # --- Template download button ---
         if st.button("📥 Download Batch Template", key="floater_template_btn"):
+            # Note: Template now reflects combined cleaning and no vessel class column.
+            # The user should still include both TankCleaning and TopsideIsolationCleaning columns (same value).
+            # VesselClass can be omitted; it will be derived from TankCapacity during batch processing.
             template_data = {
                 'UnitType': ['FPSO'],
                 'Location': ['PM'],
@@ -2020,8 +2017,7 @@ with tab_data:
                 'ReimbursableMarkup': [0.0],
                 'NoPipelineRiser': [4],
                 'TankCleaning': ['Not required'],
-                'TankCapacity_bbl': [400000],
-                'VesselClass': ['VLCC'],
+                'TankCapacity_bbl': [0],  # 0 when not required
                 'TopsideIsolationCleaning': ['Not required'],
                 'Number of subsystem': [5],
             }
@@ -2041,7 +2037,6 @@ with tab_data:
                         'Mooring Chain and drag anchor retrieve/release'
                     ],
                     'TankCleaning': ['Required', 'Not required'],
-                    'VesselClass': ['Panamax', 'Aframax', 'Suezmax', 'VLCC'],
                     'TopsideIsolationCleaning': ['Required', 'Not required']
                 }
                 col_mapping = {name: idx+1 for idx, name in enumerate(template_df.columns)}
