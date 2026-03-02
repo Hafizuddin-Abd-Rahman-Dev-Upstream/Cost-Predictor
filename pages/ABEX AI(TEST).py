@@ -1858,6 +1858,7 @@ with tab_data:
                             input_dict[col] = "Unknown"
 
                     # Add numerical columns
+                    cleaning_flag = 1.0 if cleaning_required == "Required" else 0.0
                     for col in numerical_cols:
                         if col == 'NoMooringChainAnchor':
                             input_dict[col] = float(mooring_chain_anchor)
@@ -1871,6 +1872,10 @@ with tab_data:
                             input_dict[col] = float(tank_capacity)
                         elif col == 'Number of subsystem':
                             input_dict[col] = float(subsystem)
+                        elif col == 'TankCleaning':
+                            input_dict[col] = cleaning_flag
+                        elif col == 'TopsideIsolationCleaning':
+                            input_dict[col] = cleaning_flag
                         else:
                             input_dict[col] = 0.0
 
@@ -1938,6 +1943,7 @@ with tab_data:
                         st.dataframe(summary_df[display_cols], use_container_width=True)
 
                     st.info(f"📊 Model confidence: R² = {metrics['r2']:.3f}, Typical error range: ±RM {metrics['rmse']:,.2f}")
+                    
 
                 except Exception as e:
                     st.error(f"Error making prediction: {e}")
