@@ -1012,10 +1012,29 @@ with tab_data:
         ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
         df_model = st.session_state.datasets[ds_name_model]
 
-        with st.spinner("Imputing & preparing..."):
-            imputed_model = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_model), columns=df_model.columns)
-            X_model = imputed_model.iloc[:, :-1]
-            y_model = imputed_model.iloc[:, -1]
+        with st.spinner("Preparing data..."):
+            # Separate numerical and categorical columns
+            num_cols = df_model.select_dtypes(include=np.number).columns.tolist()
+            cat_cols = df_model.select_dtypes(include='object').columns.tolist()
+            
+            if num_cols:
+                # Impute numerical columns with KNNImputer
+                imputer_num = KNNImputer(n_neighbors=5)
+                imputed_num = imputer_num.fit_transform(df_model[num_cols])
+                df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols, index=df_model.index)
+            else:
+                df_imputed_num = pd.DataFrame()
+            
+            # For categorical columns, we keep them as is (or you could fill with mode)
+            df_cat = df_model[cat_cols] if cat_cols else pd.DataFrame()
+            
+            # Combine back, preserving original order
+            df_imputed = pd.concat([df_imputed_num, df_cat], axis=1)
+            # Reorder columns to match original
+            df_imputed = df_imputed[df_model.columns]
+            
+            X_model = df_imputed.iloc[:, :-1]
+            y_model = df_imputed.iloc[:, -1]
 
         st.markdown('<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>', unsafe_allow_html=True)
         m1, m2 = st.columns([1, 3])
@@ -1064,52 +1083,78 @@ with tab_data:
     else:
         ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
         df_viz = st.session_state.datasets[ds_name_viz]
-        imputed_viz = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_viz), columns=df_viz.columns)
-        X_viz = imputed_viz.iloc[:, :-1]
-        y_viz = imputed_viz.iloc[:, -1]
+        
+        # Prepare data: impute numerical only, keep categorical
+        num_cols_viz = df_viz.select_dtypes(include=np.number).columns.tolist()
+        cat_cols_viz = df_viz.select_dtypes(include='object').columns.tolist()
+        
+        if num_cols_viz:
+            imputer_num = KNNImputer(n_neighbors=5)
+            imputed_num = imputer_num.fit_transform(df_viz[num_cols_viz])
+            df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_viz, index=df_viz.index)
+        else:
+            df_imputed_num = pd.DataFrame()
+        
+        df_cat_viz = df_viz[cat_cols_viz] if cat_cols_viz else pd.DataFrame()
+        df_imputed_viz = pd.concat([df_imputed_num, df_cat_viz], axis=1)
+        df_imputed_viz = df_imputed_viz[df_viz.columns]
+        
+        X_viz = df_imputed_viz.iloc[:, :-1]
+        y_viz = df_imputed_viz.iloc[:, -1]
         target_column_viz = y_viz.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
-        corr = imputed_viz.corr(numeric_only=True)
+        # Correlation only on numeric columns
+        corr = df_imputed_viz.select_dtypes(include=np.number).corr()
         fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
         fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
         st.plotly_chart(fig_corr, use_container_width=True)
 
         st.markdown('<h4 style="margin:0;color:#000;">Feature Importance</h4><p>Model</p>', unsafe_allow_html=True)
-        scaler_viz = MinMaxScaler().fit(X_viz)
-        model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_viz), y_viz)
-        importances = model_viz.feature_importances_
-        fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
-        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
-        fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_fi, use_container_width=True)
+        # Use only numeric features for importance (or handle categorical separately)
+        X_numeric_viz = X_viz.select_dtypes(include=np.number)
+        if X_numeric_viz.shape[1] == 0:
+            st.warning("No numeric features available for importance plot.")
+        else:
+            scaler_viz = MinMaxScaler().fit(X_numeric_viz)
+            model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_numeric_viz), y_viz)
+            importances = model_viz.feature_importances_
+            fi = pd.DataFrame({"feature": X_numeric_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
+            fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
+            fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_fi, use_container_width=True)
 
         st.markdown('<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>', unsafe_allow_html=True)
-        feat = st.selectbox("Select feature for cost curve", X_viz.columns)
-        x_vals = imputed_viz[feat].values
-        y_vals = y_viz.values
-        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-        scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
-        fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
+        # Only numeric features can be used for cost curve
+        numeric_feats = X_viz.select_dtypes(include=np.number).columns.tolist()
+        if numeric_feats:
+            feat = st.selectbox("Select feature for cost curve", numeric_feats)
+            x_vals = df_imputed_viz[feat].values
+            y_vals = y_viz.values
+            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+            scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
+            fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
 
-        if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
-            xv = scatter_df[feat].to_numpy(dtype=float)
-            yv = scatter_df[target_column_viz].to_numpy(dtype=float)
-            slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
-            x_line = np.linspace(xv.min(), xv.max(), 100)
-            y_line = slope * x_line + intercept
-            fig_cc.add_trace(
-                go.Scatter(
-                    x=x_line,
-                    y=y_line,
-                    mode="lines",
-                    name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
+            if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
+                xv = scatter_df[feat].to_numpy(dtype=float)
+                yv = scatter_df[target_column_viz].to_numpy(dtype=float)
+                slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
+                x_line = np.linspace(xv.min(), xv.max(), 100)
+                y_line = slope * x_line + intercept
+                fig_cc.add_trace(
+                    go.Scatter(
+                        x=x_line,
+                        y=y_line,
+                        mode="lines",
+                        name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
+                    )
                 )
-            )
+            else:
+                st.warning("Not enough valid/variable data to compute regression.")
+            fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_cc, use_container_width=True)
         else:
-            st.warning("Not enough valid/variable data to compute regression.")
-        fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_cc, use_container_width=True)
+            st.warning("No numeric features available for cost curve.")
 
     # ========================= PREDICT =======================================
     st.divider()
@@ -1122,8 +1167,23 @@ with tab_data:
         df_pred = st.session_state.datasets[ds_name_pred]
         currency_pred = get_currency_symbol(df_pred)
 
-        imputed_pred = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_pred), columns=df_pred.columns)
-        X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
+        # Prepare data: impute numerical only, keep categorical
+        num_cols_pred = df_pred.select_dtypes(include=np.number).columns.tolist()
+        cat_cols_pred = df_pred.select_dtypes(include='object').columns.tolist()
+        
+        if num_cols_pred:
+            imputer_num = KNNImputer(n_neighbors=5)
+            imputed_num = imputer_num.fit_transform(df_pred[num_cols_pred])
+            df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_pred, index=df_pred.index)
+        else:
+            df_imputed_num = pd.DataFrame()
+        
+        df_cat_pred = df_pred[cat_cols_pred] if cat_cols_pred else pd.DataFrame()
+        df_imputed_pred = pd.concat([df_imputed_num, df_cat_pred], axis=1)
+        df_imputed_pred = df_imputed_pred[df_pred.columns]
+        
+        X_pred = df_imputed_pred.iloc[:, :-1]
+        y_pred = df_imputed_pred.iloc[:, -1]
         target_column_pred = y_pred.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
@@ -2074,9 +2134,23 @@ with tab_pb:
             df_comp = st.session_state.datasets[dataset_for_comp]
             currency_ds = get_currency_symbol(df_comp)
 
-            imputed_comp = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_comp), columns=df_comp.columns)
-            X_comp = imputed_comp.iloc[:, :-1]
-            y_comp = imputed_comp.iloc[:, -1]
+            # Prepare data: impute numerical only, keep categorical
+            num_cols_comp = df_comp.select_dtypes(include=np.number).columns.tolist()
+            cat_cols_comp = df_comp.select_dtypes(include='object').columns.tolist()
+            
+            if num_cols_comp:
+                imputer_num = KNNImputer(n_neighbors=5)
+                imputed_num = imputer_num.fit_transform(df_comp[num_cols_comp])
+                df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_comp, index=df_comp.index)
+            else:
+                df_imputed_num = pd.DataFrame()
+            
+            df_cat_comp = df_comp[cat_cols_comp] if cat_cols_comp else pd.DataFrame()
+            df_imputed_comp = pd.concat([df_imputed_num, df_cat_comp], axis=1)
+            df_imputed_comp = df_imputed_comp[df_comp.columns]
+            
+            X_comp = df_imputed_comp.iloc[:, :-1]
+            y_comp = df_imputed_comp.iloc[:, -1]
             target_column_comp = y_comp.name
 
             default_label = st.session_state.component_labels.get(dataset_for_comp, "")
