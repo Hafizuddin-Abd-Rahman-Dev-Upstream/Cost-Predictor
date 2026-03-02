@@ -37,6 +37,7 @@ from pptx.dml.color import RGBColor
 from openpyxl.formatting.rule import ColorScaleRule
 from openpyxl.chart import BarChart, LineChart, Reference
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 # ---------------------------------------------------------------------------------------
 # PAGE CONFIG
@@ -782,84 +783,6 @@ def list_csvs_from_manifest(folder_path: str):
         return []
 
 
-def evaluate_model(X, y, test_size=0.2, random_state=42):
-    Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=test_size, random_state=random_state)
-
-    rows = []
-    best_name = None
-    best_r2 = -np.inf
-    best_rmse = None
-
-    for name, ctor in MODEL_CANDIDATES.items():
-        try:
-            base_model = ctor(random_state)
-        except TypeError:
-            base_model = ctor()
-
-        pipe = Pipeline(
-            steps=[
-                ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", MinMaxScaler()),
-                ("model", base_model),
-            ]
-        )
-        pipe.fit(Xtr, ytr)
-        yhat = pipe.predict(Xte)
-        rmse = float(np.sqrt(mean_squared_error(yte, yhat)))
-        r2 = float(r2_score(yte, yhat))
-        rows.append({"model": name, "rmse": rmse, "r2": r2})
-        if r2 > best_r2:
-            best_r2 = r2
-            best_rmse = rmse
-            best_name = name
-
-    rows_sorted = sorted(rows, key=lambda d: d["r2"], reverse=True)
-    metrics = {"best_model": best_name, "rmse": best_rmse, "r2": best_r2, "models": rows_sorted}
-    return metrics
-
-
-def get_trained_model_for_dataset(X, y, dataset_name: str, random_state=42):
-    best_name = st.session_state.best_model_name_per_dataset.get(dataset_name)
-
-    if not best_name:
-        metrics = evaluate_model(X, y, test_size=0.2, random_state=random_state)
-        best_name = metrics.get("best_model", "RandomForest")
-        st.session_state.best_model_name_per_dataset[dataset_name] = best_name
-        st.session_state._last_metrics = metrics
-
-    ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
-    try:
-        base_model = ctor(random_state)
-    except TypeError:
-        base_model = ctor()
-
-    pipe = Pipeline(
-        steps=[
-            ("imputer", SimpleImputer(strategy="median")),
-            ("scaler", MinMaxScaler()),
-            ("model", base_model),
-        ]
-    )
-    pipe.fit(X, y)
-    return pipe, best_name
-
-
-def single_prediction(X, y, payload: dict, dataset_name: str = "default"):
-    model_pipe, _ = get_trained_model_for_dataset(X, y, dataset_name=dataset_name)
-    cols = list(X.columns)
-    row = {c: np.nan for c in cols}
-    for c, v in payload.items():
-        if c not in row:
-            continue
-        try:
-            row[c] = float(v) if (v is not None and str(v).strip() != "") else np.nan
-        except Exception:
-            row[c] = np.nan
-    df_in = pd.DataFrame([row], columns=cols)
-    pred = float(model_pipe.predict(df_in)[0])
-    return pred
-
-
 # ---------------------------------------------------------------------------------------
 # NAV ROW — FIVE SHAREPOINT BUTTONS
 # ---------------------------------------------------------------------------------------
@@ -1011,10 +934,35 @@ with tab_data:
         ds_name_model = st.selectbox("Dataset for model training", list(st.session_state.datasets.keys()), key="ds_model")
         df_model = st.session_state.datasets[ds_name_model]
 
-        with st.spinner("Imputing & preparing..."):
-            imputed_model = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_model), columns=df_model.columns)
-            X_model = imputed_model.iloc[:, :-1]
-            y_model = imputed_model.iloc[:, -1]
+        with st.spinner("Preparing data..."):
+            # Separate features and target (assume last column is target)
+            X_raw = df_model.iloc[:, :-1]
+            y_raw = df_model.iloc[:, -1]
+
+            # Check if target is numeric
+            if not pd.api.types.is_numeric_dtype(y_raw):
+                st.error("Target column (last column) must be numeric. Please check your dataset.")
+                st.stop()
+
+            # Identify column types
+            numeric_cols = X_raw.select_dtypes(include=np.number).columns.tolist()
+            categorical_cols = X_raw.select_dtypes(include='object').columns.tolist()
+
+            # Impute missing values only on numeric columns
+            if numeric_cols:
+                imputer_num = KNNImputer(n_neighbors=5)
+                X_numeric_imputed = imputer_num.fit_transform(X_raw[numeric_cols])
+                X_numeric_imputed = pd.DataFrame(X_numeric_imputed, columns=numeric_cols, index=X_raw.index)
+            else:
+                X_numeric_imputed = pd.DataFrame()
+
+            # Keep categorical columns as they are (could fill mode if desired)
+            X_cat = X_raw[categorical_cols] if categorical_cols else pd.DataFrame()
+
+            # Combine back in original order
+            X_processed = pd.concat([X_numeric_imputed, X_cat], axis=1)
+            X_processed = X_processed[X_raw.columns]  # restore original column order
+            y_processed = y_raw
 
         st.markdown('<h4 style="margin:0;color:#000;">Train & Evaluate</h4><p>Step 2</p>', unsafe_allow_html=True)
         m1, m2 = st.columns([1, 3])
@@ -1022,37 +970,99 @@ with tab_data:
             test_size = st.slider("Test size", 0.1, 0.5, 0.2, 0.05)
             run_train = st.button("Run training")
         with m2:
-            st.caption("Automatic best-model selection over 6 regressors (with scaling & imputation).")
+            st.caption("Automatic best-model selection over 6 regressors (with ColumnTransformer for mixed types).")
 
         if run_train:
             with st.spinner("Training model..."):
-                metrics = evaluate_model(X_model, y_model, test_size=test_size)
+                # Split data
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X_processed, y_processed, test_size=test_size, random_state=42
+                )
 
-            m3, m4 = st.columns(2)
-            with m3:
-                st.metric("RMSE (best)", f"{metrics['rmse']:,.2f}")
-            with m4:
-                st.metric("R² (best)", f"{metrics['r2']:.3f}")
+                # Define preprocessor for numeric and categorical columns
+                numeric_transformer = Pipeline(steps=[
+                    ('imputer', SimpleImputer(strategy='median')),  # just in case
+                    ('scaler', MinMaxScaler())
+                ])
+                categorical_transformer = Pipeline(steps=[
+                    ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                    ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+                ])
 
-            st.session_state._last_metrics = metrics
-            st.session_state.best_model_name_per_dataset[ds_name_model] = metrics.get("best_model")
+                # Update column lists based on the actual columns present after imputation (should be same)
+                num_cols_train = X_train.select_dtypes(include=np.number).columns.tolist()
+                cat_cols_train = X_train.select_dtypes(include='object').columns.tolist()
 
-            toast("Training complete.")
-            st.caption(f"Best model selected: **{metrics.get('best_model', 'RandomForest')}**")
+                preprocessor = ColumnTransformer(
+                    transformers=[
+                        ('num', numeric_transformer, num_cols_train),
+                        ('cat', categorical_transformer, cat_cols_train)
+                    ]
+                )
 
-            try:
-                models_list = metrics.get("models", [])
-                if models_list:
-                    df_models = pd.DataFrame(models_list).set_index("model")
-                    st.markdown("##### Model comparison (6-model pool)")
-                    styled = (
-                        df_models.style.format({"rmse": "{:,.2f}", "r2": "{:.3f}"})
-                        .background_gradient(subset=["r2"], cmap="YlGn")
-                        .background_gradient(subset=["rmse"], cmap="OrRd_r")
-                    )
-                    st.dataframe(styled, use_container_width=True)
-            except Exception as e:
-                st.warning(f"Could not render model comparison table: {e}")
+                # Evaluate each model
+                rows = []
+                best_name = None
+                best_r2 = -np.inf
+                best_rmse = None
+
+                for name, ctor in MODEL_CANDIDATES.items():
+                    try:
+                        base_model = ctor(42)
+                    except TypeError:
+                        base_model = ctor()
+
+                    pipeline = Pipeline(steps=[
+                        ('preprocessor', preprocessor),
+                        ('model', base_model)
+                    ])
+
+                    pipeline.fit(X_train, y_train)
+                    y_pred = pipeline.predict(X_test)
+                    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+                    r2 = r2_score(y_test, y_pred)
+
+                    rows.append({"model": name, "rmse": rmse, "r2": r2})
+                    if r2 > best_r2:
+                        best_r2 = r2
+                        best_rmse = rmse
+                        best_name = name
+
+                # Store best model info
+                metrics = {
+                    "best_model": best_name,
+                    "rmse": best_rmse,
+                    "r2": best_r2,
+                    "models": sorted(rows, key=lambda d: d["r2"], reverse=True)
+                }
+                st.session_state._last_metrics = metrics
+                st.session_state.best_model_name_per_dataset[ds_name_model] = best_name
+
+                # Also store the column types for later use in prediction
+                st.session_state[f"coltypes_{ds_name_model}"] = {
+                    'numeric': num_cols_train,
+                    'categorical': cat_cols_train
+                }
+
+                # Display results
+                m3, m4 = st.columns(2)
+                with m3:
+                    st.metric("RMSE (best)", f"{best_rmse:,.2f}")
+                with m4:
+                    st.metric("R² (best)", f"{best_r2:.3f}")
+
+                toast("Training complete.")
+                st.caption(f"Best model selected: **{best_name}**")
+
+                # Show comparison table
+                df_models = pd.DataFrame(rows).set_index("model")
+                st.markdown("##### Model comparison (6-model pool)")
+                styled = (
+                    df_models.style.format({"rmse": "{:,.2f}", "r2": "{:.3f}"})
+                    .background_gradient(subset=["r2"], cmap="YlGn")
+                    .background_gradient(subset=["rmse"], cmap="OrRd_r")
+                )
+                st.dataframe(styled, use_container_width=True)
 
     # ========================= VISUALIZATION ==================================
     st.divider()
@@ -1063,52 +1073,101 @@ with tab_data:
     else:
         ds_name_viz = st.selectbox("Dataset for visualization", list(st.session_state.datasets.keys()), key="ds_viz")
         df_viz = st.session_state.datasets[ds_name_viz]
-        imputed_viz = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_viz), columns=df_viz.columns)
-        X_viz = imputed_viz.iloc[:, :-1]
-        y_viz = imputed_viz.iloc[:, -1]
-        target_column_viz = y_viz.name
+
+        # Prepare data (same as training: impute numeric, keep categorical)
+        X_raw_viz = df_viz.iloc[:, :-1]
+        y_viz = df_viz.iloc[:, -1]
+        numeric_cols_viz = X_raw_viz.select_dtypes(include=np.number).columns.tolist()
+        categorical_cols_viz = X_raw_viz.select_dtypes(include='object').columns.tolist()
+
+        if numeric_cols_viz:
+            imputer_num = KNNImputer(n_neighbors=5)
+            X_num_imp = imputer_num.fit_transform(X_raw_viz[numeric_cols_viz])
+            X_num_imp = pd.DataFrame(X_num_imp, columns=numeric_cols_viz, index=X_raw_viz.index)
+        else:
+            X_num_imp = pd.DataFrame()
+
+        X_cat_viz = X_raw_viz[categorical_cols_viz] if categorical_cols_viz else pd.DataFrame()
+        X_processed_viz = pd.concat([X_num_imp, X_cat_viz], axis=1)
+        X_processed_viz = X_processed_viz[X_raw_viz.columns]
 
         st.markdown('<h4 style="margin:0;color:#000;">Correlation Matrix</h4><p>Exploration</p>', unsafe_allow_html=True)
-        corr = imputed_viz.corr(numeric_only=True)
-        fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
-        fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_corr, use_container_width=True)
+        if numeric_cols_viz:
+            corr = X_processed_viz[numeric_cols_viz].corr()
+            fig_corr = px.imshow(corr, text_auto=".2f", aspect="auto", color_continuous_scale="RdBu_r", zmin=-1, zmax=1)
+            fig_corr.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_corr, use_container_width=True)
+        else:
+            st.info("No numeric columns for correlation matrix.")
 
         st.markdown('<h4 style="margin:0;color:#000;">Feature Importance</h4><p>Model</p>', unsafe_allow_html=True)
-        scaler_viz = MinMaxScaler().fit(X_viz)
-        model_viz = RandomForestRegressor(random_state=42).fit(scaler_viz.transform(X_viz), y_viz)
-        importances = model_viz.feature_importances_
-        fi = pd.DataFrame({"feature": X_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
-        fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
-        fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_fi, use_container_width=True)
+        if X_processed_viz.shape[1] > 0:
+            # Create a simple preprocessor and model just for importance
+            num_cols = X_processed_viz.select_dtypes(include=np.number).columns.tolist()
+            cat_cols = X_processed_viz.select_dtypes(include='object').columns.tolist()
+
+            if cat_cols:
+                # Use ColumnTransformer with one-hot
+                preprocessor = ColumnTransformer([
+                    ('num', Pipeline([('scaler', MinMaxScaler())]), num_cols),
+                    ('cat', OneHotEncoder(handle_unknown='ignore', sparse_output=False), cat_cols)
+                ])
+                model = RandomForestRegressor(random_state=42)
+                pipeline = Pipeline([('pre', preprocessor), ('model', model)])
+                pipeline.fit(X_processed_viz, y_viz)
+                # Get feature names after one-hot
+                feature_names = []
+                feature_names.extend(num_cols)
+                ohe = pipeline.named_steps['pre'].named_transformers_['cat']
+                feature_names.extend(ohe.get_feature_names_out(cat_cols))
+                importances = pipeline.named_steps['model'].feature_importances_
+                # Truncate to actual length (some features might be dropped if constant)
+                if len(importances) < len(feature_names):
+                    feature_names = feature_names[:len(importances)]
+                fi = pd.DataFrame({"feature": feature_names, "importance": importances}).sort_values("importance", ascending=True)
+            else:
+                # All numeric
+                scaler = MinMaxScaler()
+                X_scaled = scaler.fit_transform(X_processed_viz)
+                model = RandomForestRegressor(random_state=42).fit(X_scaled, y_viz)
+                importances = model.feature_importances_
+                fi = pd.DataFrame({"feature": X_processed_viz.columns, "importance": importances}).sort_values("importance", ascending=True)
+
+            fig_fi = go.Figure(go.Bar(x=fi["importance"], y=fi["feature"], orientation="h"))
+            fig_fi.update_layout(xaxis_title="Importance", yaxis_title="Feature", margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_fi, use_container_width=True)
+        else:
+            st.warning("No features available for importance plot.")
 
         st.markdown('<h4 style="margin:0;color:#000;">Cost Curve</h4><p>Trend</p>', unsafe_allow_html=True)
-        feat = st.selectbox("Select feature for cost curve", X_viz.columns)
-        x_vals = imputed_viz[feat].values
-        y_vals = y_viz.values
-        mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
-        scatter_df = pd.DataFrame({feat: x_vals[mask], target_column_viz: y_vals[mask]})
-        fig_cc = px.scatter(scatter_df, x=feat, y=target_column_viz, opacity=0.65)
+        if numeric_cols_viz:
+            feat = st.selectbox("Select feature for cost curve", numeric_cols_viz)
+            x_vals = X_processed_viz[feat].values
+            y_vals = y_viz.values
+            mask = (~np.isnan(x_vals)) & (~np.isnan(y_vals))
+            scatter_df = pd.DataFrame({feat: x_vals[mask], y_viz.name: y_vals[mask]})
+            fig_cc = px.scatter(scatter_df, x=feat, y=y_viz.name, opacity=0.65)
 
-        if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
-            xv = scatter_df[feat].to_numpy(dtype=float)
-            yv = scatter_df[target_column_viz].to_numpy(dtype=float)
-            slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
-            x_line = np.linspace(xv.min(), xv.max(), 100)
-            y_line = slope * x_line + intercept
-            fig_cc.add_trace(
-                go.Scatter(
-                    x=x_line,
-                    y=y_line,
-                    mode="lines",
-                    name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
+            if mask.sum() >= 2 and np.unique(x_vals[mask]).size >= 2:
+                xv = scatter_df[feat].to_numpy(dtype=float)
+                yv = scatter_df[y_viz.name].to_numpy(dtype=float)
+                slope, intercept, r_value, p_value, std_err = linregress(xv, yv)
+                x_line = np.linspace(xv.min(), xv.max(), 100)
+                y_line = slope * x_line + intercept
+                fig_cc.add_trace(
+                    go.Scatter(
+                        x=x_line,
+                        y=y_line,
+                        mode="lines",
+                        name=f"Fit: y={slope:.2f}x+{intercept:.2f} (R²={r_value**2:.3f})",
+                    )
                 )
-            )
+            else:
+                st.warning("Not enough valid/variable data to compute regression.")
+            fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
+            st.plotly_chart(fig_cc, use_container_width=True)
         else:
-            st.warning("Not enough valid/variable data to compute regression.")
-        fig_cc.update_layout(margin=dict(l=0, r=0, t=10, b=0))
-        st.plotly_chart(fig_cc, use_container_width=True)
+            st.info("No numeric features for cost curve.")
 
     # ========================= PREDICT =======================================
     st.divider()
@@ -1121,9 +1180,24 @@ with tab_data:
         df_pred = st.session_state.datasets[ds_name_pred]
         currency_pred = get_currency_symbol(df_pred)
 
-        imputed_pred = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_pred), columns=df_pred.columns)
-        X_pred, y_pred = imputed_pred.iloc[:, :-1], imputed_pred.iloc[:, -1]
-        target_column_pred = y_pred.name
+        # Prepare features and target (same as training)
+        X_raw_pred = df_pred.iloc[:, :-1]
+        y_raw_pred = df_pred.iloc[:, -1]
+        numeric_cols_pred = X_raw_pred.select_dtypes(include=np.number).columns.tolist()
+        categorical_cols_pred = X_raw_pred.select_dtypes(include='object').columns.tolist()
+
+        if numeric_cols_pred:
+            imputer_num = KNNImputer(n_neighbors=5)
+            X_num_imp = imputer_num.fit_transform(X_raw_pred[numeric_cols_pred])
+            X_num_imp = pd.DataFrame(X_num_imp, columns=numeric_cols_pred, index=X_raw_pred.index)
+        else:
+            X_num_imp = pd.DataFrame()
+
+        X_cat_pred = X_raw_pred[categorical_cols_pred] if categorical_cols_pred else pd.DataFrame()
+        X_processed_pred = pd.concat([X_num_imp, X_cat_pred], axis=1)
+        X_processed_pred = X_processed_pred[X_raw_pred.columns]
+        y_processed_pred = y_raw_pred
+        target_column_pred = y_processed_pred.name
 
         st.markdown('<h4 style="margin:0;color:#000;">Configuration (EPRR • Financial)</h4><p>Step 3</p>', unsafe_allow_html=True)
 
@@ -1157,9 +1231,9 @@ with tab_data:
 
         cols_per_row = 3
         new_data = {}
-        cols_pred = list(X_pred.columns)
-        rows = (len(cols_pred) + cols_per_row - 1) // cols_per_row
-        for r in range(rows):
+        cols_pred = list(X_processed_pred.columns)
+        rows_input = (len(cols_pred) + cols_per_row - 1) // cols_per_row
+        for r in range(rows_input):
             row_cols = st.columns(cols_per_row)
             for i in range(cols_per_row):
                 idx = r * cols_per_row + i
@@ -1170,7 +1244,72 @@ with tab_data:
                         new_data[col_name] = val
 
         if st.button("Run Prediction"):
-            pred_val = single_prediction(X_pred, y_pred, new_data, dataset_name=ds_name_pred)
+            # Build a single-row DataFrame with the same preprocessing
+            input_dict = {}
+            for col in cols_pred:
+                v = new_data.get(col, "")
+                if v is None or str(v).strip() == "":
+                    input_dict[col] = np.nan
+                else:
+                    try:
+                        # Try to convert to float; if fails, keep as string
+                        input_dict[col] = float(v)
+                    except:
+                        input_dict[col] = v
+            input_df = pd.DataFrame([input_dict])
+
+            # Apply KNN imputation on numeric columns (using the same imputer as on full data)
+            if numeric_cols_pred:
+                # Refit imputer on full dataset (or we could have stored it)
+                full_num = df_pred[numeric_cols_pred]
+                imputer_temp = KNNImputer(n_neighbors=5)
+                imputer_temp.fit(full_num)
+                # Impute the input row for numeric columns
+                input_num = imputer_temp.transform(input_df[numeric_cols_pred])
+                input_df[numeric_cols_pred] = input_num
+
+            # Get best model name
+            best_name = st.session_state.best_model_name_per_dataset.get(ds_name_pred)
+            if best_name is None:
+                st.error("Please run model training first for this dataset.")
+                st.stop()
+
+            # Build pipeline with same preprocessor as during training
+            num_cols_train = numeric_cols_pred  # assume same as training (should be stored)
+            cat_cols_train = categorical_cols_pred
+
+            numeric_transformer = Pipeline(steps=[
+                ('imputer', SimpleImputer(strategy='median')),
+                ('scaler', MinMaxScaler())
+            ])
+            categorical_transformer = Pipeline(steps=[
+                ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+            ])
+
+            preprocessor = ColumnTransformer(
+                transformers=[
+                    ('num', numeric_transformer, num_cols_train),
+                    ('cat', categorical_transformer, cat_cols_train)
+                ]
+            )
+
+            ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
+            try:
+                base_model = ctor(42)
+            except TypeError:
+                base_model = ctor()
+
+            model_pipe = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('model', base_model)
+            ])
+
+            # Train on full dataset
+            model_pipe.fit(X_processed_pred, y_processed_pred)
+
+            # Predict
+            pred_val = float(model_pipe.predict(input_df)[0])
 
             owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
                 pred_val, eprr, sst_pct, owners_pct, cont_pct, esc_pct
@@ -1210,12 +1349,54 @@ with tab_data:
             file_id = f"{xls.name}_{xls.size}_{ds_name_pred}"
             if file_id not in st.session_state.processed_excel_files:
                 batch_df = pd.read_excel(xls)
-                missing = [c for c in X_pred.columns if c not in batch_df.columns]
+                missing = [c for c in X_processed_pred.columns if c not in batch_df.columns]
                 if missing:
                     st.error(f"Missing required columns in Excel: {missing}")
                 else:
-                    model_pipe, best_name = get_trained_model_for_dataset(X_pred, y_pred, dataset_name=ds_name_pred)
-                    preds = model_pipe.predict(batch_df[X_pred.columns])
+                    # Get best model name
+                    best_name = st.session_state.best_model_name_per_dataset.get(ds_name_pred)
+                    if best_name is None:
+                        st.error("Please run model training first for this dataset.")
+                        st.stop()
+
+                    # Prepare batch input: ensure numeric columns are numeric
+                    for col in numeric_cols_pred:
+                        if col in batch_df.columns:
+                            batch_df[col] = pd.to_numeric(batch_df[col], errors='coerce')
+
+                    # Build pipeline
+                    num_cols_train = numeric_cols_pred
+                    cat_cols_train = categorical_cols_pred
+
+                    numeric_transformer = Pipeline(steps=[
+                        ('imputer', SimpleImputer(strategy='median')),
+                        ('scaler', MinMaxScaler())
+                    ])
+                    categorical_transformer = Pipeline(steps=[
+                        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+                    ])
+
+                    preprocessor = ColumnTransformer(
+                        transformers=[
+                            ('num', numeric_transformer, num_cols_train),
+                            ('cat', categorical_transformer, cat_cols_train)
+                        ]
+                    )
+
+                    ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
+                    try:
+                        base_model = ctor(42)
+                    except TypeError:
+                        base_model = ctor()
+
+                    model_pipe = Pipeline(steps=[
+                        ('preprocessor', preprocessor),
+                        ('model', base_model)
+                    ])
+                    model_pipe.fit(X_processed_pred, y_processed_pred)
+
+                    preds = model_pipe.predict(batch_df[X_processed_pred.columns])
 
                     for i, row in batch_df.iterrows():
                         name = row.get("Project Name", f"Project {i+1}")
@@ -1225,7 +1406,7 @@ with tab_data:
                         )
 
                         entry = {"Project Name": name}
-                        entry.update(row[X_pred.columns].to_dict())
+                        entry.update(row[X_processed_pred.columns].to_dict())
                         entry[target_column_pred] = round(float(preds[i]), 2)
 
                         for k, v in eprr_costs.items():
@@ -1443,8 +1624,15 @@ with tab_data:
                             'Feature': feature_names[:len(importances)],
                             'Importance': importances
                         }).sort_values('Importance', ascending=False).head(15)
+
+                    # Store unique values for categorical columns
+                    categorical_unique_values = {}
+                    for col in categorical_cols:
+                        # Use the processed dataframe (df_processed) which has no missing values
+                        unique_vals = df_processed[col].dropna().unique().tolist()
+                        categorical_unique_values[col] = unique_vals
                     
-                    # Store model and metrics - MAKE SURE TO INCLUDE COLUMN TYPES
+                    # Store model and metrics
                     st.session_state.floater_model = {
                         'pipeline': model_pipeline,
                         'metrics': {
@@ -1455,7 +1643,9 @@ with tab_data:
                             'categorical_cols': categorical_cols,
                             'numerical_cols': numerical_cols,
                             'feature_importance': feature_importance
-                        }
+                        },
+                        'categorical_unique_values': categorical_unique_values,
+                        'feature_columns': X.columns.tolist()
                     }
                     
                     # Show results
@@ -1818,7 +2008,58 @@ with tab_data:
     # -------------------------------------------------------------------------
     if st.session_state.get('floater_model') is not None:
         st.markdown('<h4 style="margin:0;color:#000;">Batch Prediction</h4><p>Upload Excel for multiple predictions</p>', unsafe_allow_html=True)
-        
+
+        # --- Template download button ---
+        if st.button("📥 Download Batch Template", key="floater_template_btn"):
+            template_data = {
+                'UnitType': ['FPSO'],
+                'Location': ['PM'],
+                'NoMooringChainAnchor': [8],
+                'NoMidWaterArch': [2],
+                'MooringHandling': ['Cut anchor pile and retrieve chain only'],
+                'ReimbursableMarkup': [0.0],
+                'NoPipelineRiser': [4],
+                'TankCleaning': ['Not required'],
+                'TankCapacity_bbl': [400000],
+                'VesselClass': ['VLCC'],
+                'TopsideIsolationCleaning': ['Not required'],
+                'Number of subsystem': [5],
+            }
+            template_df = pd.DataFrame(template_data)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                template_df.to_excel(writer, index=False, sheet_name='Template')
+                workbook = writer.book
+                worksheet = writer.sheets['Template']
+                cat_options = {
+                    'UnitType': ['FPSO', 'FSO'],
+                    'Location': ['PM', 'SB', 'SK'],
+                    'MooringHandling': [
+                        'Cut anchor pile and retrieve chain only',
+                        'Mooring Chain and anchor pile leave in situ',
+                        'Mooring Chain and drag anchor retrieve/release'
+                    ],
+                    'TankCleaning': ['Required', 'Not required'],
+                    'VesselClass': ['Panamax', 'Aframax', 'Suezmax', 'VLCC'],
+                    'TopsideIsolationCleaning': ['Required', 'Not required']
+                }
+                col_mapping = {name: idx+1 for idx, name in enumerate(template_df.columns)}
+                for col_name, options in cat_options.items():
+                    if col_name in col_mapping:
+                        col_letter = get_column_letter(col_mapping[col_name])
+                        dv = DataValidation(type="list", formula1=f'"{",".join(options)}"')
+                        worksheet.add_data_validation(dv)
+                        dv.add(f'{col_letter}2:{col_letter}1048576')
+            output.seek(0)
+            st.download_button(
+                "⬇️ Download Excel Template",
+                data=output,
+                file_name="floater_prediction_template.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="floater_template_download"
+            )
+
         # Get model info
         model_data = st.session_state.floater_model
         model_pipeline = model_data['pipeline']
@@ -1826,24 +2067,21 @@ with tab_data:
         expected_columns = st.session_state.floater_feature_columns
         categorical_cols = metrics['categorical_cols']
         numerical_cols = metrics['numerical_cols']
-        
+        cat_unique = model_data.get('categorical_unique_values', {})
+
         batch_file = st.file_uploader(
             "Upload Excel file for batch prediction",
             type=["xlsx", "xls"],
             key="floater_batch_file"
         )
-        
+
         if batch_file is not None:
             try:
-                # Read Excel file
                 batch_df = pd.read_excel(batch_file)
-                
                 st.write("📊 Uploaded Data Preview:")
                 st.dataframe(batch_df.head())
-                
-                # Check required columns
+
                 missing_cols = [col for col in expected_columns if col not in batch_df.columns]
-                
                 if missing_cols:
                     st.error(f"Missing required columns: {', '.join(missing_cols)}")
                     st.info(f"Expected columns: {', '.join(expected_columns)}")
@@ -1851,61 +2089,86 @@ with tab_data:
                     if st.button("🔢 Run Batch Prediction", key="run_batch_floater"):
                         with st.spinner("Processing batch prediction..."):
                             try:
-                                # Process each row exactly like single prediction
                                 processed_rows = []
-                                
                                 for idx, row in batch_df.iterrows():
-                                    # Build input dictionary with correct data types
                                     input_dict = {}
-                                    
-                                    # Add categorical columns as strings
+
+                                    # ---- Categorical columns ----
                                     for col in categorical_cols:
-                                        val = row[col]
-                                        if pd.isna(val) or val is None:
+                                        raw_val = row[col]
+                                        if pd.isna(raw_val) or raw_val is None:
                                             input_dict[col] = "Unknown"
                                         else:
-                                            input_dict[col] = str(val).strip()
-                                    
-                                    # Add numerical columns as floats
+                                            val = str(raw_val).strip()
+                                            known_values = cat_unique.get(col, [])
+                                            
+                                            # Define mapping function for boolean-like values
+                                            def map_to_known(v, known):
+                                                if not known:
+                                                    return v
+                                                if v in known:
+                                                    return v
+                                                # case-insensitive
+                                                for k in known:
+                                                    if k.lower() == v.lower():
+                                                        return k
+                                                # map common boolean representations
+                                                v_low = v.lower()
+                                                if v_low in ['1', 'true', 'yes']:
+                                                    # pick the one that likely means "required" (not containing "not")
+                                                    for k in known:
+                                                        if 'not' not in k.lower():
+                                                            return k
+                                                if v_low in ['0', 'false', 'no']:
+                                                    for k in known:
+                                                        if 'not' in k.lower():
+                                                            return k
+                                                # fallback
+                                                return known[0]
+                                            
+                                            mapped_val = map_to_known(val, known_values)
+                                            if mapped_val != val:
+                                                st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' mapped to '{mapped_val}'.")
+                                            input_dict[col] = mapped_val
+
+                                    # ---- Numerical columns ----
                                     for col in numerical_cols:
-                                        val = row[col]
-                                        if pd.isna(val) or val is None:
+                                        raw_val = row[col]
+                                        if pd.isna(raw_val) or raw_val is None:
                                             input_dict[col] = 0.0
                                         else:
+                                            # Remove commas, percent signs, and convert
                                             try:
-                                                input_dict[col] = float(val)
+                                                # Handle strings like "1,000" or "10%"
+                                                cleaned = str(raw_val).replace(',', '').replace('%', '').strip()
+                                                input_dict[col] = float(cleaned)
                                             except:
+                                                st.warning(f"Row {idx+1}: Column '{col}' value '{raw_val}' could not be parsed as number. Using 0.")
                                                 input_dict[col] = 0.0
-                                    
+
                                     processed_rows.append(input_dict)
-                                
-                                # Create DataFrame with correct dtypes
+
+                                # Create DataFrame with correct column order
                                 processed_df = pd.DataFrame(processed_rows)
-                                
-                                # Ensure column order matches training data
                                 processed_df = processed_df[expected_columns]
-                                
-                                # Debug info - show data types
-                                st.write("Debug - Processed Data Types:")
-                                st.write(processed_df.dtypes)
-                                
+
+                                # Force numerical columns to float (safety)
+                                for col in numerical_cols:
+                                    if col in processed_df.columns:
+                                        processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce').fillna(0.0)
+
                                 # Make predictions
                                 predictions = model_pipeline.predict(processed_df)
-                                
+
                                 # Add predictions to original dataframe
                                 batch_df['Predicted Cost (RM)'] = predictions
-                                
-                                # Calculate with markup if markup column exists
                                 if 'ReimbursableMarkup' in batch_df.columns:
                                     batch_df['Total with Markup (RM)'] = batch_df.apply(
-                                        lambda row: row['Predicted Cost (RM)'] + 
-                                                   (row['Predicted Cost (RM)'] * (row['ReimbursableMarkup'] / 100)),
+                                        lambda row: row['Predicted Cost (RM)'] * (1 + row['ReimbursableMarkup']/100),
                                         axis=1
                                     )
-                                
-                                # Display results with statistics
+
                                 st.success(f"✅ Batch prediction complete! Processed {len(batch_df)} records.")
-                                
                                 col1, col2, col3 = st.columns(3)
                                 with col1:
                                     st.metric("Min Prediction", f"RM {predictions.min():,.2f}")
@@ -1913,33 +2176,32 @@ with tab_data:
                                     st.metric("Max Prediction", f"RM {predictions.max():,.2f}")
                                 with col3:
                                     st.metric("Avg Prediction", f"RM {predictions.mean():,.2f}")
-                                
+
                                 with st.expander("📊 Detailed Results", expanded=True):
                                     st.dataframe(batch_df, use_container_width=True)
-                                
+
                                 # Download button
                                 batch_buffer = io.BytesIO()
                                 with pd.ExcelWriter(batch_buffer, engine='openpyxl') as writer:
                                     batch_df.to_excel(writer, index=False, sheet_name='Batch Predictions')
                                 batch_buffer.seek(0)
-                                
                                 st.download_button(
                                     label="📥 Download Batch Results",
                                     data=batch_buffer,
                                     file_name="floater_batch_predictions.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                                 )
-                                
-                                # Compare with latest single prediction if available
+
+                                # Compare with latest single prediction
                                 if st.session_state.floater_predictions:
                                     latest_single = st.session_state.floater_predictions[-1]
                                     st.info(f"Latest single prediction: RM {latest_single['Predicted Cost (RM)']:,.2f}")
-                                
+
                             except Exception as e:
                                 st.error(f"Error during prediction: {e}")
                                 import traceback
                                 st.error(traceback.format_exc())
-                            
+
             except Exception as e:
                 st.error(f"Error processing batch file: {e}")
 
@@ -1987,9 +2249,23 @@ with tab_pb:
             df_comp = st.session_state.datasets[dataset_for_comp]
             currency_ds = get_currency_symbol(df_comp)
 
-            imputed_comp = pd.DataFrame(KNNImputer(n_neighbors=5).fit_transform(df_comp), columns=df_comp.columns)
-            X_comp = imputed_comp.iloc[:, :-1]
-            y_comp = imputed_comp.iloc[:, -1]
+            # Prepare data: impute numeric only, keep categorical
+            num_cols_comp = df_comp.select_dtypes(include=np.number).columns.tolist()
+            cat_cols_comp = df_comp.select_dtypes(include='object').columns.tolist()
+            
+            if num_cols_comp:
+                imputer_num = KNNImputer(n_neighbors=5)
+                imputed_num = imputer_num.fit_transform(df_comp[num_cols_comp])
+                df_imputed_num = pd.DataFrame(imputed_num, columns=num_cols_comp, index=df_comp.index)
+            else:
+                df_imputed_num = pd.DataFrame()
+            
+            df_cat_comp = df_comp[cat_cols_comp] if cat_cols_comp else pd.DataFrame()
+            df_imputed_comp = pd.concat([df_imputed_num, df_cat_comp], axis=1)
+            df_imputed_comp = df_imputed_comp[df_comp.columns]
+            
+            X_comp = df_imputed_comp.iloc[:, :-1]
+            y_comp = df_imputed_comp.iloc[:, -1]
             target_column_comp = y_comp.name
 
             default_label = st.session_state.component_labels.get(dataset_for_comp, "")
@@ -2003,8 +2279,8 @@ with tab_pb:
             feat_cols = list(X_comp.columns)
             comp_inputs = {}
             cols_per_row = 2
-            rows = (len(feat_cols) + cols_per_row - 1) // cols_per_row
-            for r in range(rows):
+            rows_input = (len(feat_cols) + cols_per_row - 1) // cols_per_row
+            for r in range(rows_input):
                 row_cols = st.columns(cols_per_row)
                 for i in range(cols_per_row):
                     idx = r * cols_per_row + i
@@ -2051,13 +2327,58 @@ with tab_pb:
                             row_payload[f] = np.nan
 
                 try:
-                    base_pred = single_prediction(X_comp, y_comp, row_payload, dataset_name=dataset_for_comp)
+                    # Get best model name
+                    best_name = st.session_state.best_model_name_per_dataset.get(dataset_for_comp)
+                    if best_name is None:
+                        st.error("Please run model training first for this dataset.")
+                        st.stop()
+
+                    # Build pipeline with same preprocessor as during training
+                    num_cols_train = X_comp.select_dtypes(include=np.number).columns.tolist()
+                    cat_cols_train = X_comp.select_dtypes(include='object').columns.tolist()
+
+                    numeric_transformer = Pipeline(steps=[
+                        ('imputer', SimpleImputer(strategy='median')),
+                        ('scaler', MinMaxScaler())
+                    ])
+                    categorical_transformer = Pipeline(steps=[
+                        ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+                        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+                    ])
+
+                    preprocessor = ColumnTransformer(
+                        transformers=[
+                            ('num', numeric_transformer, num_cols_train),
+                            ('cat', categorical_transformer, cat_cols_train)
+                        ]
+                    )
+
+                    ctor = MODEL_CANDIDATES.get(best_name, MODEL_CANDIDATES["RandomForest"])
+                    try:
+                        base_model = ctor(42)
+                    except TypeError:
+                        base_model = ctor()
+
+                    model_pipe = Pipeline(steps=[
+                        ('preprocessor', preprocessor),
+                        ('model', base_model)
+                    ])
+
+                    # Train on full dataset
+                    model_pipe.fit(X_comp, y_comp)
+
+                    # Prepare input row
+                    input_df = pd.DataFrame([row_payload])
+                    # Ensure numeric columns are float
+                    for col in num_cols_train:
+                        if col in input_df.columns:
+                            input_df[col] = pd.to_numeric(input_df[col], errors='coerce')
+
+                    base_pred = float(model_pipe.predict(input_df)[0])
 
                     owners_cost, sst_cost, contingency_cost, escalation_cost, eprr_costs, grand_total = cost_breakdown(
                         base_pred, eprr_pb, sst_pb, owners_pb, cont_pb, esc_pb
                     )
-
-                    _, best_name = get_trained_model_for_dataset(X_comp, y_comp, dataset_name=dataset_for_comp)
 
                     comp_entry = {
                         "component_type": component_type or default_label or "Component",
