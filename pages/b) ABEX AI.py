@@ -3,7 +3,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
@@ -99,6 +99,50 @@ def get_currency_symbol(df):
 def format_currency(amount, currency=''):
     return f"{currency} {amount:.2f}"
 
+def setup_encoding(df_model):
+    """Detect object-dtype columns, fill NaN with mode, apply OrdinalEncoder.
+    Returns the encoded numeric DataFrame, list of categorical column names, and the fitted encoder."""
+    df_model = df_model.copy()
+    df_model.columns = df_model.columns.str.replace('\xa0', ' ').str.strip()
+    cat_cols = df_model.select_dtypes(include=['object']).columns.tolist()
+    if cat_cols:
+        for col in cat_cols:
+            mode_val = df_model[col].mode()
+            df_model[col] = df_model[col].fillna(mode_val[0] if not mode_val.empty else 'Unknown')
+        ord_enc = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+        df_encoded = df_model.copy()
+        df_encoded[cat_cols] = ord_enc.fit_transform(df_model[cat_cols])
+    else:
+        ord_enc = None
+        df_encoded = df_model.copy()
+    df_encoded = df_encoded.apply(pd.to_numeric, errors='coerce')
+    return df_encoded, cat_cols, ord_enc
+
+
+def encode_inputs(payload, cat_cols, ord_enc):
+    """Encode categorical values in a prediction payload dict and coerce all values to float."""
+    encoded = {}
+    if cat_cols and ord_enc is not None:
+        cat_values = [
+            str(payload.get(c)) if payload.get(c) is not None and pd.notna(payload.get(c)) else 'Unknown'
+            for c in cat_cols
+        ]
+        try:
+            cat_enc = ord_enc.transform([cat_values])
+            for i, col in enumerate(cat_cols):
+                encoded[col] = float(cat_enc[0][i])
+        except Exception:
+            for col in cat_cols:
+                encoded[col] = np.nan
+    for k, v in payload.items():
+        if k not in encoded:
+            try:
+                encoded[k] = float(v) if v is not None and pd.notna(v) else np.nan
+            except (ValueError, TypeError):
+                encoded[k] = np.nan
+    return encoded
+
+
 def download_all_predictions():
     if not st.session_state['predictions'] or all(len(preds) == 0 for preds in st.session_state['predictions'].values()):
         st.sidebar.error("No predictions available to download")
@@ -129,6 +173,51 @@ def download_all_predictions():
         file_name="All_Predictions.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+def read_csv_flexible(source):
+    """Read CSV from a file-like object or URL/path with multiple encoding fallbacks.
+
+    Accepts Streamlit uploaded files (have .getvalue()), or a URL/string path.
+    Tries utf-8, utf-8-sig, cp1252, latin1 and finally decodes with replacement and
+    strips NBSP characters.
+    """
+    encs = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1']
+
+    # URL or path string
+    if isinstance(source, str):
+        try:
+            return pd.read_csv(source)
+        except Exception:
+            # try fetching bytes and decoding with fallbacks
+            res = requests.get(source)
+            res.raise_for_status()
+            content = res.content
+            for e in encs:
+                try:
+                    txt = content.decode(e)
+                    return pd.read_csv(io.StringIO(txt))
+                except Exception:
+                    continue
+            txt = content.decode('utf-8', errors='replace').replace('\xa0', ' ')
+            return pd.read_csv(io.StringIO(txt))
+
+    # file-like (Streamlit UploadedFile)
+    try:
+        data = source.getvalue()
+    except Exception:
+        # last resort: let pandas try
+        return pd.read_csv(source)
+
+    for e in encs:
+        try:
+            txt = data.decode(e)
+            return pd.read_csv(io.StringIO(txt))
+        except Exception:
+            continue
+
+    txt = data.decode('utf-8', errors='replace').replace('\xa0', ' ')
+    return pd.read_csv(io.StringIO(txt))
 
 def main():
     st.title('💲ABEX AI RT2025💲')
@@ -184,7 +273,7 @@ def main():
             if selected_file:
                 raw_url = f"https://raw.githubusercontent.com/{GITHUB_USER}/{REPO_NAME}/{BRANCH}/{DATA_FOLDER}/{selected_file}"
                 try:
-                    df = pd.read_csv(raw_url)
+                    df = read_csv_flexible(raw_url)
                     fake_file = type('FakeUpload', (), {'name': selected_file})
                     uploaded_files.append(fake_file)
                     st.session_state['datasets'][selected_file] = df
@@ -198,7 +287,8 @@ def main():
 
     for uploaded_file in uploaded_files:
         if uploaded_file.name not in st.session_state['datasets']:
-            df = pd.read_csv(uploaded_file)
+            # Use flexible reader for uploaded files to avoid encoding errors
+            df = read_csv_flexible(uploaded_file)
             st.session_state['datasets'][uploaded_file.name] = df
             if uploaded_file.name not in st.session_state['predictions']:
                 st.session_state['predictions'][uploaded_file.name] = []
@@ -227,8 +317,17 @@ def main():
     st.subheader(f"📊 Metrics: {clean_name}")
 
     currency = get_currency_symbol(df)
+
+    # Store the first column separately for project names
+    project_names = df.iloc[:, 0] if len(df.columns) > 0 else pd.Series()
+
+    # Use all columns except the first one for the model
+    df_model = df.iloc[:, 1:] if len(df.columns) > 1 else df
+
+    # Encode categorical columns then impute remaining NaNs
+    df_model_encoded, cat_cols, ord_enc = setup_encoding(df_model)
     imputer = KNNImputer(n_neighbors=5)
-    df_imputed = pd.DataFrame(imputer.fit_transform(df), columns=df.columns)
+    df_imputed = pd.DataFrame(imputer.fit_transform(df_model_encoded), columns=df_model_encoded.columns)
 
     # Minimize Data Overview
     with st.expander('Data Overview', expanded=False):    
@@ -264,8 +363,9 @@ def main():
         st.subheader('Correlation Matrix')
         feature_count = len(X.columns)
         corr_height = min(9, max(7, feature_count * 0.5))
+        df_for_corr = pd.concat([X, y], axis=1)
         fig, ax = plt.subplots(figsize=(8, corr_height))
-        sns.heatmap(df_imputed.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
+        sns.heatmap(df_for_corr.corr(), annot=True, cmap='coolwarm', fmt='.2f', annot_kws={"size": 10})
         plt.tight_layout()
         st.pyplot(fig)
         plt.close()
@@ -344,34 +444,39 @@ def main():
 
     st.header('Make New Predictions')
     project_name = st.text_input('Enter Project Name')
-    new_data = {}
-    num_cols = len(X.columns)
-    cols_per_row = min(num_cols, 2)
-    num_rows = (num_cols + cols_per_row - 1) // cols_per_row
 
-    for row in range(num_rows):
-        columns = st.columns(cols_per_row)
-        for col_idx in range(cols_per_row):
-            feature_idx = row * cols_per_row + col_idx
-            if feature_idx < num_cols:
-                col_name = X.columns[feature_idx]
-                with columns[col_idx]:
-                    user_val = st.text_input(
-                        f'{col_name}', 
-                        value="", 
-                        key=f'input_{col_name}'
-                    )
-                    if user_val.strip().lower() == "nan" or user_val.strip() == "":
-                        new_data[col_name] = np.nan
-                    else:
-                        try:
-                            new_data[col_name] = float(user_val)
-                        except ValueError:
-                            new_data[col_name] = np.nan
+    # Table form for feature inputs
+    st.markdown("**Feature Inputs**")
+    st.markdown("Provide feature values (1 row). Leave blank for NaN.")
+
+    # Build column config: dropdowns for categorical columns
+    col_cfg = {}
+    if cat_cols and ord_enc is not None:
+        for i, col in enumerate(cat_cols):
+            if col in X.columns:
+                col_cfg[col] = st.column_config.SelectboxColumn(col, options=ord_enc.categories_[i].tolist(), required=False)
+
+    input_key = f"input_row__{selected_dataset_name}"
+    if input_key not in st.session_state:
+        init_row = {}
+        for col in X.columns:
+            if col in cat_cols and ord_enc is not None:
+                cats = ord_enc.categories_[cat_cols.index(col)].tolist()
+                init_row[col] = cats[0] if cats else None
+            else:
+                init_row[col] = np.nan
+        st.session_state[input_key] = init_row
+
+    input_row_df = pd.DataFrame([st.session_state[input_key]], columns=X.columns)
+    edited_df = st.data_editor(input_row_df, num_rows="fixed", use_container_width=True,
+                               key=f"pred_editor_{selected_dataset_name}",
+                               column_config=col_cfg if col_cfg else None)
+    new_data = edited_df.iloc[0].to_dict()
 
 
     if st.button('Predict'):
-        df_input = pd.DataFrame([new_data])
+        encoded_input = encode_inputs(new_data, cat_cols, ord_enc)
+        df_input = pd.DataFrame([encoded_input])[X.columns]
         input_scaled = scaler.transform(df_input)
         pred = rf_model.predict(input_scaled)[0]
         result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
@@ -418,35 +523,54 @@ def main():
         file_id = f"{excel_file.name}_{excel_file.size}_{selected_dataset_name}"
         if file_id not in st.session_state['processed_excel_files']:
             batch_df = pd.read_excel(excel_file)
-            if set(X.columns).issubset(batch_df.columns):
-                scaled = scaler.transform(batch_df[X.columns])
-                preds = rf_model.predict(scaled)
-                batch_df[target_column] = preds
-                for i, row in batch_df.iterrows():
-                    name = row.get("Project Name", f"Project {i+1}")
-                    entry = {'Project Name': name}
-                    entry.update(row[X.columns].to_dict())
-                    entry[target_column] = round(preds[i], 2)
-                    for phase, percent in eprr_percentages.items():
-                        cost = round(preds[i] * (percent / 100), 2)
-                        entry[f"{phase} Cost"] = cost
-                    sst_cost = round(preds[i] * (sst_percentage / 100), 2)
-                    owners_cost = round(preds[i] * (owners_percentage / 100), 2)
-                    entry["SST Cost"] = sst_cost
-                    entry["Owner's Cost"] = owners_cost
-                    contingency_base = preds[i] + owners_cost
-                    contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
-                    entry["Cost Contingency"] = contingency_cost
-                    escalation_base = preds[i] + owners_cost
-                    escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
-                    entry["Escalation & Inflation"] = escalation_cost
-                    grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
-                    entry["Grand Total"] = grand_total
-                    st.session_state['predictions'][selected_dataset_name].append(entry)
-                st.session_state['processed_excel_files'].add(file_id)
-                st.success("Batch prediction successful!")
+
+            # Skip the first column (assuming it's project names/identifiers)
+            if len(batch_df.columns) > 1:
+                batch_features = batch_df.iloc[:, 1:]  # Skip first column
+                if set(X.columns).issubset(batch_features.columns):
+                    batch_enc = batch_features[X.columns].copy()
+                    if cat_cols and ord_enc is not None:
+                        for col in cat_cols:
+                            if col in batch_enc.columns:
+                                batch_enc[col] = batch_enc[col].fillna('Unknown').astype(str)
+                        batch_enc[cat_cols] = ord_enc.transform(batch_enc[cat_cols])
+                    batch_enc = batch_enc.apply(pd.to_numeric, errors='coerce')
+                    scaled = scaler.transform(batch_enc)
+                    preds = rf_model.predict(scaled)
+
+                    for i, row in batch_df.iterrows():
+                        # Use the first column as project name
+                        name = row.iloc[0] if not pd.isna(row.iloc[0]) else f"Project {i+1}"
+                        entry = {'Project Name': str(name)}
+
+                        # Add the feature values (skip the first column)
+                        for feature in X.columns:
+                            entry[feature] = row[feature] if feature in row else np.nan
+
+                        entry[target_column] = round(preds[i], 2)
+                        for phase, percent in eprr_percentages.items():
+                            cost = round(preds[i] * (percent / 100), 2)
+                            entry[f"{phase} Cost"] = cost
+                        sst_cost = round(preds[i] * (sst_percentage / 100), 2)
+                        owners_cost = round(preds[i] * (owners_percentage / 100), 2)
+                        entry["SST Cost"] = sst_cost
+                        entry["Owner's Cost"] = owners_cost
+                        contingency_base = preds[i] + owners_cost
+                        contingency_cost = round(contingency_base * (contingency_percentage / 100), 2)
+                        entry["Cost Contingency"] = contingency_cost
+                        escalation_base = preds[i] + owners_cost
+                        escalation_cost = round(escalation_base * (escalation_percentage / 100), 2)
+                        entry["Escalation & Inflation"] = escalation_cost
+                        grand_total = round(preds[i] + owners_cost + contingency_cost + escalation_cost, 2)
+                        entry["Grand Total"] = grand_total
+                        st.session_state['predictions'][selected_dataset_name].append(entry)
+
+                    st.session_state['processed_excel_files'].add(file_id)
+                    st.success("Batch prediction successful!")
+                else:
+                    st.error(f"Excel missing required columns. Needed: {list(X.columns)}")
             else:
-                st.error("Excel missing required columns.")
+                st.error("Excel file must have at least 2 columns (project name + features)")
 
     with st.expander('Simplified Project List', expanded=True):
         preds = st.session_state['predictions'][selected_dataset_name]
