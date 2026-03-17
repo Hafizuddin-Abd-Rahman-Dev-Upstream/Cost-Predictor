@@ -3,7 +3,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, OrdinalEncoder
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import numpy as np
@@ -218,9 +218,53 @@ def project_totals(proj):
         "grand_total": float(dfc["Grand Total"].sum()),
     }
 
-def single_prediction(rf_model, scaler, X_columns, payload):
-    df_input = pd.DataFrame([payload])
-    # Ensure all required columns are present
+def setup_encoding(df_model):
+    """Detect object-dtype columns, fill NaN with mode, apply OrdinalEncoder.
+    Returns the encoded numeric DataFrame, list of categorical column names, and the fitted encoder."""
+    df_model = df_model.copy()
+    df_model.columns = df_model.columns.str.replace('\xa0', ' ').str.strip()
+    cat_cols = df_model.select_dtypes(include=['object']).columns.tolist()
+    if cat_cols:
+        for col in cat_cols:
+            mode_val = df_model[col].mode()
+            df_model[col] = df_model[col].fillna(mode_val[0] if not mode_val.empty else 'Unknown')
+        ord_enc = OrdinalEncoder(handle_unknown='use_encoded_value', unknown_value=-1)
+        df_encoded = df_model.copy()
+        df_encoded[cat_cols] = ord_enc.fit_transform(df_model[cat_cols])
+    else:
+        ord_enc = None
+        df_encoded = df_model.copy()
+    df_encoded = df_encoded.apply(pd.to_numeric, errors='coerce')
+    return df_encoded, cat_cols, ord_enc
+
+
+def encode_inputs(payload, cat_cols, ord_enc):
+    """Encode categorical values in a prediction payload dict and coerce all values to float."""
+    encoded = {}
+    if cat_cols and ord_enc is not None:
+        cat_values = [
+            str(payload.get(c)) if payload.get(c) is not None and pd.notna(payload.get(c)) else 'Unknown'
+            for c in cat_cols
+        ]
+        try:
+            cat_enc = ord_enc.transform([cat_values])
+            for i, col in enumerate(cat_cols):
+                encoded[col] = float(cat_enc[0][i])
+        except Exception:
+            for col in cat_cols:
+                encoded[col] = np.nan
+    for k, v in payload.items():
+        if k not in encoded:
+            try:
+                encoded[k] = float(v) if v is not None and pd.notna(v) else np.nan
+            except (ValueError, TypeError):
+                encoded[k] = np.nan
+    return encoded
+
+
+def single_prediction(rf_model, scaler, X_columns, payload, cat_cols=None, ord_enc=None):
+    encoded = encode_inputs(payload, cat_cols or [], ord_enc)
+    df_input = pd.DataFrame([encoded])
     for col in X_columns:
         if col not in df_input.columns:
             df_input[col] = np.nan
@@ -401,9 +445,11 @@ def main():
         # Use all columns except the first one for the model
         # The last column is still the target, but now we start from column 1
         df_model = df.iloc[:, 1:] if len(df.columns) > 1 else df
-        
+
+        # Encode categorical columns then impute remaining NaNs
+        df_model_encoded, cat_cols, ord_enc = setup_encoding(df_model)
         imputer = KNNImputer(n_neighbors=5)
-        df_imputed = pd.DataFrame(imputer.fit_transform(df_model), columns=df_model.columns)
+        df_imputed = pd.DataFrame(imputer.fit_transform(df_model_encoded), columns=df_model_encoded.columns)
         
         # Minimized collapse for Data Overview
         with st.expander('Data Overview', expanded=False):
@@ -530,20 +576,33 @@ def main():
         st.markdown("**Feature Inputs**")
         st.markdown("Provide feature values (1 row). Leave blank for NaN.")
         
-        # Create a dataframe with one row for editing
+        # Build column config: dropdowns for categorical columns
+        col_cfg = {}
+        if cat_cols and ord_enc is not None:
+            for i, col in enumerate(cat_cols):
+                if col in X.columns:
+                    col_cfg[col] = st.column_config.SelectboxColumn(col, options=ord_enc.categories_[i].tolist(), required=False)
+
         input_key = f"input_row__{selected_dataset_name}"
         if input_key not in st.session_state:
-            st.session_state[input_key] = {col: np.nan for col in X.columns}
-        
+            init_row = {}
+            for col in X.columns:
+                if col in cat_cols and ord_enc is not None:
+                    cats = ord_enc.categories_[cat_cols.index(col)].tolist()
+                    init_row[col] = cats[0] if cats else None
+                else:
+                    init_row[col] = np.nan
+            st.session_state[input_key] = init_row
+
         input_row_df = pd.DataFrame([st.session_state[input_key]], columns=X.columns)
-        edited_df = st.data_editor(input_row_df, num_rows="fixed", use_container_width=True, key=f"pred_editor_{selected_dataset_name}")
+        edited_df = st.data_editor(input_row_df, num_rows="fixed", use_container_width=True,
+                                   key=f"pred_editor_{selected_dataset_name}",
+                                   column_config=col_cfg if col_cfg else None)
         new_data = edited_df.iloc[0].to_dict()
 
         if st.button('Predict'):
-            df_input = pd.DataFrame([new_data])
-            input_scaled = scaler.transform(df_input)
-            pred = rf_model.predict(input_scaled)[0]
-            
+            encoded_input = encode_inputs(new_data, cat_cols, ord_enc)
+            df_input = pd.DataFrame([encoded_input])[X.columns]
             input_scaled = scaler.transform(df_input)
             pred = rf_model.predict(input_scaled)[0]
             result = {'Project Name': project_name, **new_data, target_column: round(pred, 2)}
@@ -602,7 +661,14 @@ def main():
                     batch_features = batch_df.iloc[:, 1:]  # Skip first column
                     # Ensure we have the right columns for prediction
                     if set(X.columns).issubset(batch_features.columns):
-                        scaled = scaler.transform(batch_features[X.columns])
+                        batch_enc = batch_features[X.columns].copy()
+                        if cat_cols and ord_enc is not None:
+                            for col in cat_cols:
+                                if col in batch_enc.columns:
+                                    batch_enc[col] = batch_enc[col].fillna('Unknown').astype(str)
+                            batch_enc[cat_cols] = ord_enc.transform(batch_enc[cat_cols])
+                        batch_enc = batch_enc.apply(pd.to_numeric, errors='coerce')
+                        scaled = scaler.transform(batch_enc)
                         preds = rf_model.predict(scaled)
                         
                         for i, row in batch_df.iterrows():
@@ -737,8 +803,9 @@ def main():
 
         # Get target column (last column)
         df_model_comp = df_comp.iloc[:, 1:] if len(df_comp.columns) > 1 else df_comp
+        df_model_comp_encoded, cat_cols_comp, ord_enc_comp = setup_encoding(df_model_comp)
         imputer_comp = KNNImputer(n_neighbors=5)
-        df_imputed_comp = pd.DataFrame(imputer_comp.fit_transform(df_model_comp), columns=df_model_comp.columns)
+        df_imputed_comp = pd.DataFrame(imputer_comp.fit_transform(df_model_comp_encoded), columns=df_model_comp_encoded.columns)
         X_comp = df_imputed_comp.iloc[:, :-1]
         y_comp = df_imputed_comp.iloc[:, -1]
         target_column_comp = y_comp.name
@@ -761,13 +828,29 @@ def main():
         )
 
         st.markdown("**Component Feature Inputs (1 row)**")
+        # Build column config: dropdowns for categorical columns
+        comp_col_cfg = {}
+        if cat_cols_comp and ord_enc_comp is not None:
+            for i, col in enumerate(cat_cols_comp):
+                if col in X_comp.columns:
+                    comp_col_cfg[col] = st.column_config.SelectboxColumn(col, options=ord_enc_comp.categories_[i].tolist(), required=False)
+
         comp_input_key = f"pb_input_row__{proj_sel}__{dataset_for_comp}"
         if comp_input_key not in st.session_state:
-            st.session_state[comp_input_key] = {c: np.nan for c in X_comp.columns}
+            init_comp = {}
+            for col in X_comp.columns:
+                if col in cat_cols_comp and ord_enc_comp is not None:
+                    cats = ord_enc_comp.categories_[cat_cols_comp.index(col)].tolist()
+                    init_comp[col] = cats[0] if cats else None
+                else:
+                    init_comp[col] = np.nan
+            st.session_state[comp_input_key] = init_comp
 
         comp_row_df = pd.DataFrame([st.session_state[comp_input_key]], columns=X_comp.columns)
         comp_editor_key = f"pb_editor__{proj_sel}__{dataset_for_comp}__{st.session_state.widget_nonce}"
-        comp_edited = st.data_editor(comp_row_df, num_rows="fixed", use_container_width=True, key=comp_editor_key)
+        comp_edited = st.data_editor(comp_row_df, num_rows="fixed", use_container_width=True,
+                                     key=comp_editor_key,
+                                     column_config=comp_col_cfg if comp_col_cfg else None)
         comp_payload = comp_edited.iloc[0].to_dict()
 
         st.markdown("---")
@@ -871,7 +954,7 @@ def main():
 
         if st.button("➕ Predict & Add Component", key=f"pb_add_comp_{proj_sel}_{dataset_for_comp}"):
             try:
-                base_pred = single_prediction(rf_model_comp, scaler_comp, list(X_comp.columns), comp_payload)
+                base_pred = single_prediction(rf_model_comp, scaler_comp, list(X_comp.columns), comp_payload, cat_cols_comp, ord_enc_comp)
                 owners_cost, predev_cost, contingency_cost, escalation_cost, epcic_costs, grand_total = cost_breakdown(
                     base_pred, epcic_pb, predev_percentage_pb, owners_pb, cont_pb, esc_pb
                 )
