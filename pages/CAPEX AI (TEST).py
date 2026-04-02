@@ -1270,4 +1270,4 @@ else:
     fig_cmp = px.bar(melt, x="Project", y="Amount", color="Cost Type",
                      title="Cost Breakdown by Project", barmode="stack")
 st.plotly_chart(fig_cmp, use_container_width=True)
-```
+
