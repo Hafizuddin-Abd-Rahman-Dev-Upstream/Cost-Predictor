@@ -26,12 +26,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 except Exception as e:
 st.error(
-        "❌ Missing dependency: **scikit-learn**.\n\n"
-        "Add `scikit-learn` to requirements.txt and redeploy.\n\n"
-        f"Details: {e}"
-    )
-    st.stop()
-
+“❌ Missing dependency: **scikit-learn**.\n\n”
+“Add `scikit-learn` to requirements.txt and redeploy.\n\n”
+f”Details: {e}”
+)
+st.stop()
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -121,7 +120,7 @@ html,body{{font-family:'Inter',sans-serif;}}
   background:linear-gradient(to right,{PETRONAS["teal"]},{PETRONAS["purple"]});
   color:#fff;border-color:transparent;box-shadow:0 4px 16px rgba(0,0,0,.15);}}
 .stTabs [role="tab"][aria-selected="true"]::after{{
-  content:"";position:absolute;left:10%;bottom:-3px;width:80%;height:3px;
+  content:'';position:absolute;left:10%;bottom:-3px;width:80%;height:3px;
   background:linear-gradient(90deg,{PETRONAS["teal"]},{PETRONAS["purple"]},{PETRONAS["teal"]});
   background-size:200% 100%;border-radius:2px;animation:glowSlide 2.5s linear infinite;}}
 @keyframes glowSlide{{0%{{background-position:0% 50%}}50%{{background-position:100% 50%}}100%{{background-position:0% 50%}}}}
@@ -1271,4 +1270,4 @@ else:
     fig_cmp = px.bar(melt, x="Project", y="Amount", color="Cost Type",
                      title="Cost Breakdown by Project", barmode="stack")
 st.plotly_chart(fig_cmp, use_container_width=True)
-
+```
