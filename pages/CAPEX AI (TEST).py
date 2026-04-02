@@ -26,11 +26,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 except Exception as e:
 st.error(
-“❌ Missing dependency: **scikit-learn**.\n\n”
-“Add `scikit-learn` to requirements.txt and redeploy.\n\n”
-f”Details: {e}”
-)
-st.stop()
+        "❌ Missing dependency: **scikit-learn**.\n\n"
+        "Add `scikit-learn` to requirements.txt and redeploy.\n\n"
+        f"Details: {e}"
+    )
+    st.stop()
+
 
 import plotly.express as px
 import plotly.graph_objects as go
